@@ -2,7 +2,9 @@
 // into a renderer the shop window drives frame by frame from the recorded match instead of the
 // homepage's own canned replay. Same isometric store, shelves, fridges, produce bins, bread racks,
 // Grocery Bots with their baskets, and trucks backing into the bays; the bots wear the player's
-// look and the trucks the player's colour.
+// look and the trucks are the player's own trucks, the same ones that drive on the map.
+import { COLORS as COLORS_LOOK, HEADS, WOOD, cleanLook, mix as mixHex, truckArt } from './looks.js';
+
 const NS = 'http://www.w3.org/2000/svg';
 const A = 24, B = 12, SHELF = 21, WALL = 30, SLAB = 9, EDGE = .72;
 const TRUCK = { CARGO: 2.25, GAP: .07, CAB: .78, TOP: 31, CAB_TOP: 24, FLOOR: 6, PARKED: .97, AWAY: -15 };
@@ -57,7 +59,7 @@ export function createIsoShop(svg, layout) {
   for (const [x, y, p] of layout.items) {
     const type = layout.products[p];
     shelves[x + ',' + y] = type;
-    fixtures[x + ',' + y] = FIXTURE_OF[type] || 'shelf';
+    fixtures[x + ',' + y] = layout.fixtures?.[x + ',' + y] || FIXTURE_OF[type] || 'shelf';   // the shop's own fixtures when it has departments
   }
   const bayX = new Set(BAYS.map(([x]) => x));
   const solid = (x, y) => walls.has(x + ',' + y) || (x + ',' + y) in shelves;
@@ -137,6 +139,7 @@ export function createIsoShop(svg, layout) {
   }
 
   const WALL_TONE = ['#f7f5f3', '#e2dcd7', '#d6cfc9'];
+  const SPINE_TONE = ['#ece7e3', '#e6e0db', '#d4ccc5'];
   const SIGN = 3.6, signY = (1 + Y) / 2 + SIGN / 2;
   const trim = y => y < Math.floor(signY - SIGN) || y > Math.floor(signY);
   for (let y = 0; y < Y; y++) {
@@ -151,12 +154,29 @@ export function createIsoShop(svg, layout) {
           if (y === 0) poly([P(x, 1, WALL - 5), P(x + 1, 1, WALL - 5), P(x + 1, 1, WALL - 8), P(x, 1, WALL - 8)], '#c8102e', layer);
         }
       } else {
-        const type = shelves[x + ',' + y], kind = fixtures[x + ',' + y] || 'shelf', fixture = FIXTURES[kind];
-        const g = box(x, y, fixture.height, fixture.tone, layer);
+        const type = shelves[x + ',' + y];
+        const kind = fixtures[x + ',' + y] || fixtures[(x - 1) + ',' + y] || fixtures[(x + 1) + ',' + y] || 'shelf', fixture = FIXTURES[kind];
+        const g = box(x, y, fixture.height, type ? fixture.tone : SPINE_TONE, layer);
         if (type) goods(g, x, y, type, kind, fixture.height);
       }
     }
   }
+  // department signs (as on the v1 homepage store): one per shelf block, unless the block above
+  // in the same aisle is the same department
+  const departments = layout.departments || [];
+  departments.forEach((department, i) => {
+    const above = departments.find(o => o.x === department.x && o.y < department.y && o.name === department.name);
+    if (above) return;
+    const h = (FIXTURES[department.fixture] || FIXTURES.shelf).height;
+    const wide = shelves[(department.x + 2) + ',' + department.y] !== undefined;       // a double row: centre over all three cells
+    const [sx, sy] = P(department.x + (wide ? 1.5 : .5), department.y + .5, h + 14);
+    const u = Math.hypot(A, B), w = department.name.length * 6 + 12;
+    const label = el('g', { transform: `matrix(${A / u} ${B / u} 0 1 ${sx} ${sy})`, 'aria-label': department.name }, layers[W + H]);
+    el('rect', { x: -w / 2, y: -12, width: w, height: 15, rx: 1, fill: '#c8102e' }, label);
+    const text = el('text', { x: 0, y: -.5, 'text-anchor': 'middle', 'font-size': 11, 'font-family': 'Mulish, sans-serif', 'font-weight': 800, fill: '#fff' }, label);
+    text.textContent = department.name.toUpperCase();
+  });
+
   const unit = Math.hypot(A, B), [ex, ey] = P(1, signY, WALL - 7);
   const sign = el('g', { transform: `matrix(${A / unit} ${-B / unit} 0 1 ${ex} ${ey})` }, layers[Math.floor(signY)]);
   el('image', { href: 'static/assets/grocery-bot-icon.svg', width: 15, height: 15 }, sign);
@@ -184,38 +204,43 @@ export function createIsoShop(svg, layout) {
   // ---- trucks (arena.js truckMarkup, in the player's colour) ------------------------
   const rr = (u0, u1, v0, v1, ru, rv) =>
     `M${u0 + ru} ${v0}H${u1 - ru}A${ru} ${rv} 0 0 1 ${u1} ${v0 + rv}V${v1 - rv}A${ru} ${rv} 0 0 1 ${u1 - ru} ${v1}H${u0 + ru}A${ru} ${rv} 0 0 1 ${u0} ${v1 - rv}V${v0 + rv}A${ru} ${rv} 0 0 1 ${u0 + ru} ${v0}Z`;
-  const LOGO = '<path d="M-11.5 -6C-11.5 -15 -6.8 -19.5 0 -19.5S11.5 -15 11.5 -6C11.5 -2 9.4 0 5.2 0H-5.2C-9.4 0 -11.5 -2 -11.5 -6Z" fill="#fff"/>' +
+  const LOGO_UNUSED = '<path d="M-11.5 -6C-11.5 -15 -6.8 -19.5 0 -19.5S11.5 -15 11.5 -6C11.5 -2 9.4 0 5.2 0H-5.2C-9.4 0 -11.5 -2 -11.5 -6Z" fill="#fff"/>' +
     '<ellipse cx="-4.2" cy="-9" rx="2.5" ry="3.5" fill="#c8102e"/><ellipse cx="4.2" cy="-9" rx="2.5" ry="3.5" fill="#c8102e"/>' +
     '<path d="M-8.4 -26.6H8.4L6.8 -21H-6.8Z" fill="#fff"/>';
-  let paint = '#c8102e', eyes = '#fff';
+  let paint = '#c8102e', truckLook = { carriage: 'box', head: 'flat' }, truckHead = HEADS.flat, truckSide = '';
 
+  // The player's own truck (looks.js truckArt, the art the map trucks use) painted on the truck's
+  // visible side, plus roof faces and the open rear door with the loaded goods from arena.js.
+  // Side art: svg x -74 (rear) .. 70 (cab) runs along u = 0 .. -3.1 cells; svg y 38 is the ground.
+  // flat parts of each cab's roof in svg x (from looks.js HEADS): [x from, x to, svg y]
+  const CAB_ROOFS = { flat: [[24, 56, -38]], high: [[24, 54, -50]], nose: [[24, 41, -38], [53, 68, -11]], slant: [[24, 38, -38]] };
+  const ART_U = -3.1 / 144, ART_U0 = -74 * 3.1 / 144, ART_Z = .344;
+  const artU = x => ART_U * x + ART_U0, artZ = y => (38 - y) * ART_Z;
   function truckMarkup(dock, s) {
-    const { CARGO, GAP, CAB, TOP, CAB_TOP, FLOOR } = TRUCK;
-    const x0 = dock + .06, x1 = dock + .94, r = 0;
-    const c0 = r - CARGO, k1 = c0 - GAP, k0 = k1 - CAB;
+    const { TOP, FLOOR } = TRUCK;
+    const x0 = dock + .06, x1 = dock + .94, r = 0, k0 = artU(72);
     const v = z => -z;
-    const eyeU = [k0 + .2, k0 + .42];
     const door = 21 * (1 - s.open);
     const goodsColor = type => COLORS[type] || '#b3a994';
-    const [lx, ly] = P(x1, r - .18);
     let out = `<polygon points="${pts([P(x0 - .04, k0 - .05), P(x1 + .2, k0 - .05), P(x1 + .2, r + .12), P(x0 - .04, r + .12)])}" fill="rgba(23,20,18,.13)"/>`;
     out += `<g transform="translate(0 ${-(s.bounce || 0)})">`;
-    out += `<g transform="matrix(${-A} ${B} 0 1 ${x1 * A} ${x1 * B})">`;
-    out += `<path d="${rr(k0, k1, v(CAB_TOP), v(FLOOR - 1), .16, 5)}" fill="${paint}"/>`;
-    out += `<ellipse cx="${k1 - .2}" cy="${v(CAB_TOP - 5.5)}" rx=".07" ry="3" fill="#fff" opacity=".28"/>`;
-    out += s.happy
-      ? `<path d="${eyeU.map(u => `M${u - .08} ${v(15)}Q${u} ${v(21)} ${u + .08} ${v(15)}L${u + .05} ${v(15)}Q${u} ${v(18.4)} ${u - .05} ${v(15)}Z`).join('')}" fill="${eyes}"/>`
-      : eyeU.map(u => `<ellipse cx="${u}" cy="${v(16.5)}" rx=".075" ry="${s.blink ? .5 : 3.6}" fill="${eyes}"/>`).join('');
-    out += `<path d="${rr(c0, r, v(TOP), v(FLOOR - 1), .08, 3)}" fill="#f1ece8"/>`;
-    out += `<rect x="${c0}" y="${v(FLOOR + 2)}" width="${CARGO}" height="3" fill="${paint}"/>`;
-    out += `<rect x="${k0 + .05}" y="${v(FLOOR)}" width="${r - k0 - .1}" height="3.6" fill="#2b2522"/>`;
-    for (const u of [r - .45, c0 + .5, k0 + .32]) {
-      out += `<ellipse cx="${u}" cy="${v(3.4)}" rx=".15" ry="3.6" fill="#2b2522"/><ellipse cx="${u}" cy="${v(3.4)}" rx=".06" ry="1.5" fill="#cfc7c1"/>`;
+    // roof faces first (they sit behind the side art's top edge)
+    const roof = (u0, u1, z, fill) => { out += `<polygon points="${pts([P(x0, u0, z), P(x1, u0, z), P(x1, u1, z), P(x0, u1, z)])}" fill="${fill}"/>`; };
+    const roofIn = (x0in, x1in, u0, u1, z, fill) => { out += `<polygon points="${pts([P(x0 + x0in, u0, z), P(x1 - x1in, u0, z), P(x1 - x1in, u1, z), P(x0 + x0in, u1, z)])}" fill="${fill}"/>`; };
+    if (truckLook.carriage === 'flatbed') {
+      roof(artU(14), artU(-72), artZ(4), WOOD);
+      // the crates' tops, lowest first, so taller crates sit on top (same crates as looks.js)
+      for (const [x, y, w, c] of [[-14, -8, 18, COLORS_LOOK.carrot], [-64, -22, 22, COLORS_LOOK.oat], [-40, -16, 24, COLORS_LOOK.leaf], [-60, -40, 16, COLORS_LOOK.lemon]].sort((a, b) => b[1] - a[1]))
+        roofIn(.12, .12, artU(x + w), artU(x), artZ(y), c);
+    } else {
+      roof(artU(14), artU(-72), artZ(truckLook.carriage === 'canvas' ? -50 : -52), truckLook.carriage === 'canvas' ? mixHex(paint, '#ffffff', .78) : '#fbfaf8');
+      if (truckLook.carriage === 'cooler') roofIn(.2, .2, artU(-6), artU(-34), artZ(-61), '#d6cfc8');
     }
-    out += '</g>';
-    out += `<g transform="matrix(${A / unit} ${-B / unit} 0 1 ${lx} ${ly - 15})">`;
-    out += `<rect x="0" y="-8" width="8.5" height="8.5" rx="2.2" fill="#c8102e"/><g transform="translate(4.25 -.3) scale(.22)">${LOGO}</g>`;
-    out += '<text x="11" y="-1.6" font-family="Mulish, Arial, sans-serif" font-weight="900" font-size="6.2" fill="#c8102e">Grocery Bot</text></g>';
+    const cab = shade(paint, .14);
+    for (const [xa, xb, y] of CAB_ROOFS[truckLook.head] || CAB_ROOFS.flat) roof(artU(xb), artU(xa), artZ(y), cab);
+    if (truckLook.visor === 'lights') roofIn(.15, .15, artU(truckHead.roof + 13), artU(truckHead.roof - 13), artZ(truckHead.top - 6), '#2b2522');
+    out += `<g transform="matrix(${-A} ${B} 0 1 ${x1 * A} ${x1 * B})"><g transform="matrix(${ART_U} 0 0 ${ART_Z} ${ART_U0} ${-38 * ART_Z})">${truckSide}</g></g>`;
+    // rear: the door rolls up while docked and shows what robots have loaded
     out += `<g transform="matrix(${A} ${B} 0 1 ${-r * A} ${r * B})">`;
     out += `<rect x="${x0}" y="${v(TOP)}" width="${x1 - x0}" height="${TOP - FLOOR + 1}" rx=".05" fill="#e2dcd6"/>`;
     out += `<rect x="${x0 + .07}" y="${v(TOP - 2)}" width="${x1 - x0 - .14}" height="${TOP - FLOOR - 3}" fill="#3d3532"/>`;
@@ -232,8 +257,6 @@ export function createIsoShop(svg, layout) {
     out += `<rect x="${x0 + .02}" y="${v(FLOOR + 1.6)}" width=".12" height="2.4" rx=".03" fill="${lamp}"/>`;
     out += `<rect x="${x1 - .14}" y="${v(FLOOR + 1.6)}" width=".12" height="2.4" rx=".03" fill="${lamp}"/>`;
     out += `<rect x="${x0}" y="${v(FLOOR - .5)}" width="${x1 - x0}" height="3" fill="#2b2522"/></g>`;
-    out += `<polygon points="${pts([P(x0, k0 + .08, CAB_TOP), P(x1, k0 + .08, CAB_TOP), P(x1, k1, CAB_TOP), P(x0, k1, CAB_TOP)])}" fill="${shade(paint, .16)}"/>`;
-    out += `<polygon points="${pts([P(x0, c0, TOP), P(x1, c0, TOP), P(x1, r, TOP), P(x0, r, TOP)])}" fill="#fbfaf8"/>`;
     return out + '</g>';
   }
 
@@ -293,7 +316,7 @@ export function createIsoShop(svg, layout) {
     const blink = ((clock / 1000 + truck.dock * .37) % 3.4) < .13;
     const bounce = moving ? .6 * Math.abs(Math.sin(clock / 55)) : 0;
     const load = shown.order.filter((_, k) => shown.mask[k] === '1');
-    const key = [paint, open.toFixed(2), hazard, happy, blink, bounce.toFixed(1), load.join()].join('|');
+    const key = [paint, truckSide.length, open.toFixed(2), hazard, bounce.toFixed(1), load.join()].join('|');
     if (key !== truck.key) {
       truck.key = key;
       truck.g.innerHTML = truckMarkup(truck.dock, { open, hazard, happy, blink, bounce, load });
@@ -318,7 +341,9 @@ export function createIsoShop(svg, layout) {
   function setPlayer(player) {
     look = player.look;
     paint = player.colour;
-    eyes = GB.light(paint) ? '#171412' : '#fff';
+    truckLook = cleanLook(player.look);
+    truckHead = HEADS[truckLook.head] || HEADS.flat;
+    truckSide = truckArt(truckLook);
     for (const bot of bots) bot.key = '';
     for (const truck of trucks) truck.key = '';
   }

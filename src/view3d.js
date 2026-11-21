@@ -7,6 +7,8 @@ import { MapControls } from 'three/addons/controls/MapControls.js';
 import { SVGLoader } from 'three/addons/loaders/SVGLoader.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { COLORS, HEADS, INK as TRUCK_INK, SHELL, EDGE, WOOD, LAMP, mix, light, face } from './looks.js';
+import { createBuildings } from './buildings3d.js?v=17';
+import { forestPath } from './forest.js?v=17';
 
 const M = 1 / 1.113;              // world units per metre (one unit is 1e-5 degree of latitude)
 const LIFT = 1.3;                 // buildings a little taller than life so the town reads from above
@@ -22,19 +24,23 @@ const ease = t => t < .5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2;
 
 export async function createWorld3d(opts) {
   const { host, overlay: ctx, view, town, game, play, wx, wy, truckAt, labels } = opts;
+  const forest = opts.forest || [];
+  const allBuildings = true;
   let picks = [];                           // this frame's clickable shops and order houses, in screen pixels
   const { OPEN, DELIVERED, PARKED, TRAIL, POP_TICKS, INK } = opts.constants;
   const [extra, relief, heights] = await Promise.all([
-    fetch('data/buildings.json?v=14').then(res => res.json()),
-    fetch('data/terrain.json?v=14').then(res => res.json()),
-    fetch('data/terrain.bin?v=14').then(res => res.arrayBuffer()).then(buf => new Uint16Array(buf)),
+    fetch('data/buildings.json?v=17').then(res => res.json()),
+    fetch('data/terrain.json?v=17').then(res => res.json()),
+    fetch('data/terrain.bin?v=17').then(res => res.arrayBuffer()).then(buf => new Uint16Array(buf)),
   ]);
-  const cover = await fetch('data/landcover.json?v=14').then(res => res.ok ? res.json() : null).catch(() => null) || { wood: [], open: [] };
+  const cover = await fetch('data/landcover.json?v=17').then(res => res.ok ? res.json() : null).catch(() => null) || { wood: [], open: [] };
 
   // ---- renderer, scene, camera ------------------------------------------------
   const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
-  renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+  renderer.setPixelRatio(Math.min(allBuildings ? 1.5 : 2, window.devicePixelRatio || 1));
   renderer.shadowMap.enabled = true;
+  renderer.shadowMap.autoUpdate = false;
+  renderer.shadowMap.needsUpdate = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.setClearColor('#f6f3ef');
   host.appendChild(renderer.domElement);
@@ -46,7 +52,8 @@ export async function createWorld3d(opts) {
   const hemi = new THREE.HemisphereLight('#fffaf0', '#d9cdb4', 1.25 * PI * .5);
   const sun = new THREE.DirectionalLight('#fff9ef', 1.05 * PI * .5);
   sun.castShadow = true;
-  sun.shadow.mapSize.set(4096, 4096);
+  const shadowResolution = allBuildings || innerWidth <= 760 ? 2048 : 4096;
+  sun.shadow.mapSize.set(shadowResolution, shadowResolution);
   sun.shadow.bias = -0.0004;
   sun.shadow.normalBias = 0.6;
   scene.add(hemi, sun, sun.target);
@@ -129,6 +136,7 @@ export async function createWorld3d(opts) {
     g.setTransform(k, 0, 0, k, -X0 * k, -Z0 * k);
     g.fillStyle = PALETTE.green;
     g.fill(area(town.green));
+    if (forest.length) g.fill(forestPath(forest));
     g.fillStyle = PALETTE.water;
     g.fill(area(town.water));
     const t = new THREE.CanvasTexture(canvas);
@@ -238,6 +246,27 @@ export async function createWorld3d(opts) {
   // Buildings under a shop (often the real store) make way for the shop model, as on the 2D map.
   const PLAZA = 100;
   const nearShop = (x, z, r = PLAZA) => game.players.some(p => Math.hypot(p.shop[0] - x, p.shop[1] - z) < r);
+  const storeFootprints = new Set(game.meta.players.filter(p => p.store?.footprint).map(p => p.store.footprint.ring.join(',')));
+  // Indexed walls use four vertices per face, not six, and roof vertices are
+  // shared within each footprint. Normals stay flat and crisp; no welding pass.
+  function indexedPrism(ring, height, out) {
+    const pts = [];
+    for (let i = 0; i < ring.length; i += 2) pts.push(new THREE.Vector2(wx(ring[i]), wy(ring[i + 1])));
+    if (THREE.ShapeUtils.isClockWise(pts)) pts.reverse();
+    let lo = Infinity, hi = -Infinity;
+    for (const p of pts) { const y = heightAt(p.x, p.y); lo = Math.min(lo, y); hi = Math.max(hi, y); }
+    const foot = lo - 1.5, top = hi + height;
+    for (let i = 0; i < pts.length; i++) {
+      const a = pts[i], b = pts[(i + 1) % pts.length], dx = b.x - a.x, dz = b.y - a.y, length = Math.hypot(dx, dz) || 1;
+      const base = out.position.length / 3;
+      out.position.push(a.x, foot, a.y, a.x, top, a.y, b.x, top, b.y, b.x, foot, b.y);
+      for (let k = 0; k < 4; k++) out.normal.push(dz / length, 0, -dx / length);
+      out.index.push(base, base + 1, base + 2, base, base + 2, base + 3);
+    }
+    const roof = out.position.length / 3;
+    for (const p of pts) { out.position.push(p.x, top, p.y); out.normal.push(0, 1, 0); }
+    for (const [a, b, c] of THREE.ShapeUtils.triangulateShape(pts, [])) out.index.push(roof + a, roof + c, roof + b);
+  }
   // Dense, expanded Oslo has millions of raw context-building vertices. Remove tiny
   // wall jogs once at load, in metre-scaled coordinates; never simplify delivery homes.
   function contextOutline(flat) {
@@ -261,49 +290,41 @@ export async function createWorld3d(opts) {
     }
     return pts.flat();
   }
-  const buildingChunks = new Map();
+  // Cartoon buildings, styled by OSM type (src/buildings3d.js), merged into one
+  // mesh per facade style plus roofs/trim. All geometry stays resident at all times.
+  const cartoon = createBuildings({ heightAt, wx, wy, M, LIFT });
+  const trimMat = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
+  let buildingCount = 0, buildingVertices = 0, buildingTriangles = 0, contextMeshes = 0;
   {
-    for (const b of extra.buildings) {
-      let hit = false;
-      for (let i = 1; i < b.length && !hit; i += 2) hit = nearShop(wx(b[i]), wy(b[i + 1]));
-      if (hit) continue;
-      const h = b[0] * M * LIFT;
-      const outline = contextOutline(b.slice(1));
-      let x = 0, z = 0;
-      for (let i = 0; i < outline.length; i += 2) { x += wx(outline[i]); z += wy(outline[i + 1]); }
-      x /= outline.length / 2; z /= outline.length / 2;
-      const key = `${Math.floor(x / 650)},${Math.floor(z / 650)}`;
-      if (!buildingChunks.has(key)) buildingChunks.set(key, { x, z, parts: { walls: [], roof: [] } });
-      prism(outline, h, buildingChunks.get(key).parts);
-    }
-    const material = litBoth(PALETTE.town);
-    for (const chunk of buildingChunks.values()) {
-      // Roof silhouettes remain visible city-wide. Wall detail is local to the
-      // neighbourhood being explored, not redrawn for every distant suburb.
-      for (const key of ['walls', 'roof']) {
-        const geometry = new THREE.BufferGeometry();
-        geometry.setAttribute('position', new THREE.Float32BufferAttribute(chunk.parts[key], 3));
-        geometry.computeVertexNormals();
-        geometry.computeBoundingSphere();
-        const mesh = new THREE.Mesh(geometry, material);
-        mesh.castShadow = key === 'walls';
-        mesh.receiveShadow = true;
-        mesh.renderOrder = 20;
-        mesh.userData.buildingDetail = key;
-        scene.add(mesh);
-        chunk[key] = mesh;
-      }
-      delete chunk.parts;
+    const out = { walls: {}, trim: cartoon.bucket() };
+    extra.buildings.forEach((b, i) => {
+      if (storeFootprints.has(b.slice(1).join(','))) return;
+      cartoon.build(contextOutline(b.slice(1)), b[0], extra.info?.[i] || ['yes', '', '', ''], i, out);
+      buildingCount++;
+    });
+    const meshes = Object.entries(out.walls).map(([style, bucket]) => new THREE.Mesh(cartoon.geometry(bucket),
+      new THREE.MeshLambertMaterial({ map: cartoon.textures[style], vertexColors: true, side: THREE.DoubleSide })));
+    meshes.push(new THREE.Mesh(cartoon.geometry(out.trim), trimMat));
+    for (const mesh of meshes) {
+      mesh.castShadow = mesh.receiveShadow = true;
+      mesh.renderOrder = 20;
+      mesh.userData.buildingDetail = 'all-resident';
+      contextMeshes++;
+      scene.add(mesh);
+      buildingVertices += mesh.geometry.attributes.position.count;
+      buildingTriangles += (mesh.geometry.index?.count || mesh.geometry.attributes.position.count) / 3;
     }
   }
 
-  // Order homes: the real footprint at each address the game delivers to.
+  // Delivery homes use the same cartoon builder with own materials, so an order
+  // can recolour the walls and roof; their full geometry remains resident too.
   const homes = extra.homes.map((home, i) => {
-    const parts = { walls: [], roof: [] };
-    const height = Math.max(7, home.h) * M * LIFT;
-    const { pts, top } = prism(home.ring, height, parts);
-    const wall = litBoth(PALETTE.homeWall), roof = litBoth(PALETTE.home);
-    const mesh = new THREE.Mesh(prismGeometry(parts, true), [wall, roof]);
+    const out = { walls: {}, roof: cartoon.bucket(), trim: cartoon.bucket(), plain: true };
+    const { pts, top } = cartoon.build(home.ring, Math.max(7, home.h), home.info || ['house'], 100000 + i, out);
+    const wall = new THREE.MeshLambertMaterial({ color: PALETTE.homeWall, map: cartoon.textures[out.style], vertexColors: true, side: THREE.DoubleSide });
+    const roof = new THREE.MeshLambertMaterial({ color: PALETTE.home, vertexColors: true, side: THREE.DoubleSide });
+    const mesh = new THREE.Mesh(cartoon.geometry(out.walls[out.style], out.roof, out.trim), [wall, roof, trimMat]);
+    buildingVertices += mesh.geometry.attributes.position.count;
     mesh.castShadow = mesh.receiveShadow = true;
     mesh.renderOrder = 21;
     scene.add(mesh);
@@ -311,7 +332,6 @@ export async function createWorld3d(opts) {
     for (const p of pts) { cx += p.x; cz += p.y; }
     cx /= pts.length; cz /= pts.length;
     for (const p of pts) r = Math.max(r, Math.hypot(p.x - cx, p.y - cz));
-    // ground glow draped over the slope around the house
     const ringGeo = new THREE.RingGeometry(.01, r + 9, 40, 4).rotateX(-Math.PI / 2).translate(cx, 0, cz);
     const rp = ringGeo.attributes.position;
     for (let v = 0; v < rp.count; v++) rp.setY(v, heightAt(rp.getX(v), rp.getZ(v)) + .9);
@@ -327,6 +347,7 @@ export async function createWorld3d(opts) {
     return { i, key: `${home.p[0]},${home.p[1]}`, mesh, wall, roof, ring, pin, x: cx, z: cz, top, state: '' };
   });
   const homeAt = new Map(homes.map(h => [h.key, h]));
+  const syncHomeColour = () => {};
 
   // Pins: the 2D order square (white mark), standing on a little stem, one texture per colour.
   const pinTextures = new Map();
@@ -358,6 +379,7 @@ export async function createWorld3d(opts) {
     if (!s) {
       home.wall.color.set(PALETTE.homeWall);
       home.roof.color.set(PALETTE.home);
+      syncHomeColour(home);
       home.ring.visible = home.pin.visible = false;
       return;
     }
@@ -366,6 +388,7 @@ export async function createWorld3d(opts) {
     const fade = c => s.dim < 1 ? mix(c, PALETTE.homeWall, .7) : c;
     home.wall.color.set(fade(open ? PALETTE.open : mix(colour, '#ffffff', .25)));
     home.roof.color.set(fade(open ? PALETTE.openEdge : colour));
+    syncHomeColour(home);
     home.ring.material.color.set(open ? PALETTE.openEdge : colour);
     home.ringBase = (open ? .28 : .45) * s.dim;
     home.ring.material.opacity = home.ringBase;
@@ -672,21 +695,10 @@ export async function createWorld3d(opts) {
   }
 
   {
-    let seed = 23;
-    const rand = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
-    const forest = [], STEP = 13;
-    // Sample uniformly over the full map (a north-to-south cap would leave the
-    // southern Ekeberg/Bygdøy woods bare when the instance budget is reached).
-    const attempts = Math.ceil(W * D / (STEP * STEP));
-    for (let i = 0; i < attempts && forest.length < 32000; i++) {
-      const x = X0 + 12 + rand() * (W - 24), z = Z0 + 12 + rand() * (D - 24);
-      if (!wooded(x, z) || blockedLand(x, z)) continue;
-      if (isWater(x, z) || isWater(x + 8, z) || isWater(x - 8, z) || isWater(x, z + 8) || isWater(x, z - 8)) continue;
-      forest.push([x, z, .8 + rand() * .7, rand(), rand() < .78]);
-    }
     forestTreeCount = forest.length;
     const m = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0);
     const plant = (list, crownGeo, trunkGeo, shades) => {
+      if (!list.length) return;
       const trunks = new THREE.InstancedMesh(trunkGeo, lit('#7d6450'), list.length);
       const crowns = new THREE.InstancedMesh(crownGeo, lit('#ffffff'), list.length);
       const colours = shades.map(c => new THREE.Color(c));
@@ -749,6 +761,22 @@ export async function createWorld3d(opts) {
   }
 
   function buildShop(player) {
+    const store = game.meta.players[player.seat].store;
+    if (store?.footprint) {
+      const out = { walls: {}, roof: cartoon.bucket(), trim: cartoon.bucket(), plain: true };
+      const { top, pts } = cartoon.build(store.footprint.ring, Math.max(6, store.footprint.h), store.footprint.info || ['retail', '', '', ''], 900000 + player.seat, out);
+      const wall = new THREE.MeshLambertMaterial({ color: mix(player.colour, '#ffffff', .62), map: cartoon.textures[out.style], vertexColors: true, side: THREE.DoubleSide });
+      const roof = new THREE.MeshLambertMaterial({ color: player.colour, vertexColors: true, side: THREE.DoubleSide });
+      const geometry = cartoon.geometry(out.walls[out.style], out.roof, out.trim);
+      geometry.translate(-player.shop[0], -heightAt(player.shop[0], player.shop[1]), -player.shop[1]);
+      const mesh = new THREE.Mesh(geometry, [wall, roof, trimMat]);
+      mesh.castShadow = mesh.receiveShadow = true;
+      mesh.renderOrder = 30;
+      const group = new THREE.Group();
+      group.add(mesh);
+      const radius = Math.max(...pts.map(p => Math.hypot(p.x - player.shop[0], p.y - player.shop[1])));
+      return { group, mats: [wall, roof], actual: true, top: top - heightAt(player.shop[0], player.shop[1]), radius };
+    }
     // 2D: 62 x 34 px body, 6 px roof band, 8 striped awning tiles, window left, door right, sign above.
     const mats = { frame: lit('#583a2d'), wall: lit('#fff3da'), paint: lit(player.colour), glass: lit('#b6d4d7'), door: lit('#65493a'),
       sign: new THREE.MeshLambertMaterial({ map: signTexture }), post: lit('#583a2d') };
@@ -821,7 +849,7 @@ export async function createWorld3d(opts) {
     const mats = new Map();
     const mat = colour => { if (!mats.has(colour)) mats.set(colour, lit(colour)); return mats.get(colour); };
     const g = new THREE.Group();
-    const add = mesh => { mesh.castShadow = true; g.add(mesh); return mesh; };
+    const add = mesh => { mesh.castShadow = false; g.add(mesh); return mesh; };
     const sides = (make) => { for (const s of [-1, 1]) add(make(s)); };
 
     // decals on both sides of the carriage, like marks.* in looks.js
@@ -895,6 +923,25 @@ export async function createWorld3d(opts) {
     }
     // stand the model on the ground, centred on the 2D sprite's anchor
     g.position.set(-2, 38, 0);
+    // A fleet of 60 trucks otherwise submits thousands of tiny cab/wheel/decal
+    // meshes. Batch each look by shared material before cloning its five trucks.
+    const byMaterial = new Map();
+    for (const child of g.children) {
+      if (!child.isMesh || Array.isArray(child.material)) continue;
+      child.updateMatrix();
+      const geometry = child.geometry.index ? child.geometry.toNonIndexed() : child.geometry.clone();
+      geometry.applyMatrix4(child.matrix);
+      const key = child.material.uuid;
+      if (!byMaterial.has(key)) byMaterial.set(key, { material: child.material, geometries: [] });
+      byMaterial.get(key).geometries.push(geometry);
+    }
+    g.clear();
+    for (const { material, geometries } of byMaterial.values()) {
+      const geometry = mergeGeometries(geometries, false);
+      if (!geometry) throw new Error('Could not batch the truck geometry');
+      g.add(new THREE.Mesh(geometry, material));
+      for (const part of geometries) part.dispose();
+    }
     const holder = new THREE.Group();
     holder.rotation.order = 'YZX';            // heading about y, then nose up/down the slope
     holder.add(g);
@@ -1004,9 +1051,12 @@ export async function createWorld3d(opts) {
   }
 
   function home() {
-    const x = wx(1075100), z = wy(5992100);
+    const spread = town.coverage?.kind === 'distributed-city-match';
+    const xs = game.players.map(p => p.shop[0]), zs = game.players.map(p => p.shop[1]);
+    const x = spread ? (Math.min(...xs) + Math.max(...xs)) / 2 : wx(1075100);
+    const z = spread ? (Math.min(...zs) + Math.max(...zs)) / 2 : wy(5992100);
     // Begin inside the city. The full 85 km² world continues beyond the screen.
-    const desktopDistance = 4400, phoneDistance = 5600;
+    const desktopDistance = spread ? 11000 : 4400, phoneDistance = spread ? 18000 : 5600;
     return { target: new THREE.Vector3(x, heightAt(x, z), z),
       distance: Math.min(fitDistance, size.w > 760 ? desktopDistance : phoneDistance), polar: .88, azimuth: -.12 };
   }
@@ -1082,6 +1132,7 @@ export async function createWorld3d(opts) {
   }
 
   let before = performance.now();
+  let shadowAt = -Infinity, shadowX = Infinity, shadowZ = Infinity, shadowDistance = 0;
   function render({ index, k, a, b, time, dark, tick }) {
     const now = performance.now(), dt = Math.min(.1, (now - before) / 1000);
     before = now;
@@ -1105,16 +1156,18 @@ export async function createWorld3d(opts) {
     // Atmospheric depth follows the current zoom, never a fixed small-map range.
     scene.fog.near = distance * 1.45;
     scene.fog.far = distance * 3;
-    if (Math.hypot(detailX - controls.target.x, detailZ - controls.target.z) > 80 ||
+    if (!allBuildings && (Math.hypot(detailX - controls.target.x, detailZ - controls.target.z) > 80 ||
         Math.abs(detailDistance - distance) > Math.max(80, detailDistance * .1) ||
-        Math.abs(detailQuaternion.dot(camera.quaternion)) < .999) {
+        Math.abs(detailQuaternion.dot(camera.quaternion)) < .999)) {
       detailX = controls.target.x; detailZ = controls.target.z; detailDistance = distance;
       detailQuaternion.copy(camera.quaternion);
       camera.updateMatrixWorld();
       detailFrustum.setFromProjectionMatrix(detailProjection.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
       const roofVertices = [...buildingChunks.values()].reduce((sum, chunk) =>
         sum + (detailFrustum.intersectsObject(chunk.roof) ? chunk.roof.geometry.attributes.position.count : 0), 0);
-      let budget = Math.max(0, 625000 - roofVertices);
+      const homeVertices = homes.reduce((sum, home) =>
+        sum + (detailFrustum.intersectsObject(home.mesh) ? home.mesh.geometry.attributes.position.count : 0), 0);
+      let budget = Math.max(0, 645000 - roofVertices - homeVertices);
       const chunks = [...buildingChunks.values()].sort((a, b) =>
         Math.hypot(a.x - detailX, a.z - detailZ) - Math.hypot(b.x - detailX, b.z - detailZ));
       for (const chunk of chunks) {
@@ -1129,11 +1182,16 @@ export async function createWorld3d(opts) {
     const growAt = (x, z) => clamp((camera.position.distanceTo(tmp.set(x, heightAt(x, z), z)) / 6200) ** .65, .16, 1.25);
 
     // sun follows the view so the shadow map stays sharp where you look
-    const reach = clamp(distance * 1.1, 260, 2600);
-    sun.target.position.copy(controls.target);
-    sun.position.copy(controls.target).addScaledVector(SUN_DIR, 3000);
-    Object.assign(sun.shadow.camera, { left: -reach, right: reach, top: reach, bottom: -reach, near: 100, far: 6000 });
-    sun.shadow.camera.updateProjectionMatrix();
+    if (now - shadowAt > 200 && (Math.hypot(shadowX - controls.target.x, shadowZ - controls.target.z) > 35 ||
+        Math.abs(shadowDistance - distance) > 80)) {
+      const reach = clamp(distance * 1.1, 260, 2600);
+      sun.target.position.copy(controls.target);
+      sun.position.copy(controls.target).addScaledVector(SUN_DIR, 3000);
+      Object.assign(sun.shadow.camera, { left: -reach, right: reach, top: reach, bottom: -reach, near: 100, far: 6000 });
+      sun.shadow.camera.updateProjectionMatrix();
+      renderer.shadowMap.needsUpdate = true;
+      shadowAt = now; shadowX = controls.target.x; shadowZ = controls.target.z; shadowDistance = distance;
+    }
 
     // orders -> houses
     const states = new Map(), pops = [];
@@ -1177,14 +1235,16 @@ export async function createWorld3d(opts) {
         for (const m of actor.mats) { m.transparent = dim < 1 || !!m.map; m.opacity = dim; m.needsUpdate = true; }
       }
       actor.grow = growAt(player.shop[0], player.shop[1]);
-      actor.shop.group.scale.setScalar(SHOP_SCALE * actor.grow);
+      actor.shop.group.scale.setScalar(actor.shop.actual ? 1 : SHOP_SCALE * actor.grow);
       {
         // stand on the highest corner; the footing covers the downhill side
         const sx = player.shop[0], sz = player.shop[1], hw = 31 * SHOP_SCALE * actor.grow, hd = 18 * SHOP_SCALE * actor.grow;
-        actor.base = Math.max(heightAt(sx, sz), heightAt(sx - hw, sz - hd), heightAt(sx + hw, sz - hd), heightAt(sx - hw, sz + hd), heightAt(sx + hw, sz + hd));
+        actor.base = actor.shop.actual ? heightAt(sx, sz) : Math.max(heightAt(sx, sz), heightAt(sx - hw, sz - hd), heightAt(sx + hw, sz - hd), heightAt(sx - hw, sz + hd), heightAt(sx + hw, sz + hd));
         actor.shop.group.position.y = actor.base;
         const S = SHOP_SCALE * actor.grow, mid = project(sx, actor.base + 22 * S, sz), side = project(sx + 31 * S, actor.base + 22 * S, sz);
-        if (mid) picks.push({ kind: 'shop', seat: player.seat, x: mid.x, y: mid.y, r: Math.max(22, side ? Math.hypot(side.x - mid.x, side.y - mid.y) * 1.25 : 30) });
+        const actual = actor.shop.actual && project(sx, actor.base + actor.shop.top, sz);
+        if (actual) picks.push({ kind: 'shop', seat: player.seat, x: actual.x, y: actual.y, r: 24 });
+        else if (mid) picks.push({ kind: 'shop', seat: player.seat, x: mid.x, y: mid.y, r: Math.max(22, side ? Math.hypot(side.x - mid.x, side.y - mid.y) * 1.25 : 30) });
       }
       let parked = 0;
       const colour = new THREE.Color(player.colour);
@@ -1259,21 +1319,29 @@ export async function createWorld3d(opts) {
 
   function drawPill(actor, grow) {
     const { player } = actor;
-    const at = project(player.shop[0], actor.base ?? 0, player.shop[1] + 26 * SHOP_SCALE * grow);
+    const at = actor.shop.actual ? project(player.shop[0], (actor.base ?? 0) + actor.shop.top + 5, player.shop[1]) :
+      project(player.shop[0], actor.base ?? 0, player.shop[1] + 26 * SHOP_SCALE * grow);
     if (!at) return;
     ctx.globalAlpha = actor.dim;
     ctx.font = '800 12px Mulish, Arial, sans-serif';
-    const width = Math.min(132, ctx.measureText(player.name).width + 16), y = at.y + 4;
+    const store = game.meta.players[player.seat].store?.name;
+    const storeWidth = store ? Math.min(180, store.length * 5.8 + 16) : 0;
+    const width = Math.max(storeWidth, Math.min(132, ctx.measureText(player.name).width + 16)), y = at.y + 4;
     ctx.fillStyle = 'rgba(255,255,255,.94)';
     ctx.beginPath();
-    ctx.roundRect(at.x - width / 2, y, width, 20, 10);
+    ctx.roundRect(at.x - width / 2, y, width, store ? 34 : 20, 10);
     ctx.fill();
     ctx.fillStyle = INK;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(player.name, at.x, y + 10.5, width - 12);
+    if (store) {
+      ctx.font = '700 10px Mulish, Arial, sans-serif';
+      ctx.fillStyle = '#67594b';
+      ctx.fillText(store, at.x, y + 25, width - 12);
+    }
     ctx.fillStyle = player.colour;
-    for (let i = 0; i < actor.parked; i++) { ctx.beginPath(); ctx.arc(at.x + (i - (actor.parked - 1) / 2) * 9, y + 26, 3, 0, 7); ctx.fill(); }
+    for (let i = 0; i < actor.parked; i++) { ctx.beginPath(); ctx.arc(at.x + (i - (actor.parked - 1) / 2) * 9, y + (store ? 40 : 26), 3, 0, 7); ctx.fill(); }
     ctx.globalAlpha = 1;
   }
 
@@ -1281,6 +1349,10 @@ export async function createWorld3d(opts) {
   pose(home().target, fitDistance, TILT, 0);
   const flowAt = (x, z) => { const i = cellOf(x, z); return i < 0 || !flowSpeed[i] ? null : [flowX[i], flowZ[i], flowSpeed[i]]; };
   return { render, setActive, flyHome: () => flyTo(home()), overview, explore, zoomBy,
+    buildingMode: allBuildings ? 'all' : 'adaptive',
+    buildingStats: { count: buildingCount, vertices: buildingVertices, triangles: buildingTriangles,
+      contextDrawCalls: contextMeshes, deliveryDrawCalls: homes.length,
+      residentContextBytes: buildingVertices * 24 + (allBuildings ? buildingTriangles * 12 : 0) },
     treeCounts: { parks: parkTreeCount, forest: forestTreeCount },
     camera, controls, scene, renderer, flowAt, streaks: STREAKS, bridges, get picks() { return picks; } };
 }

@@ -1,7 +1,8 @@
 // Preview build of the live /game/CODE page (prototypes/town-rush/game-view.js) with a 3D view added.
 import { MAP_LABELS } from './game-map-labels.js';
+import { forestPath, plantForest } from './forest.js?v=17';
 import { COLORS, DEFAULT_LOOK, botSvg, cleanLook, truckSvg } from './looks.js';
-import { createPanels } from './panels.js?v=14';
+import { createPanels } from './panels.js?v=17';
 
 const $ = id => document.getElementById(id);
 const code = 'PREVIEW';
@@ -63,6 +64,7 @@ function setMeta(meta) {
     row.style.setProperty('--seat', player.colour);
     row.innerHTML = `<span class="g-rank"></span><span class="g-face">${botSvg(player.look)}</span><span class="g-who"><strong></strong><small></small></span><span class="g-score"></span>`;
     row.querySelector('strong').textContent = player.name;
+    if (player.store) row.title = `${player.store.name} · ${player.district}`;
     row.addEventListener('click', () => { play.focus = play.focus === player.seat ? null : player.seat; panels?.showShop(player.seat); lastBoardTick = -1; });
     player.row = row;
     return row;
@@ -77,7 +79,7 @@ function addFrames(frames) {
 }
 
 async function load() {
-  const res = await fetch('data/game.json').catch(() => null);
+  const res = await fetch('data/game.json?v=17').catch(() => null);
   const body = res && res.ok ? await res.json().catch(() => null) : null;
   if (!body) {
     if (!game.meta) $('message').textContent = res && res.status === 404 ? 'This game has not started yet. It opens here the moment it starts.' : 'Could not reach the game. Trying again ...';
@@ -90,7 +92,9 @@ async function load() {
   if (first) {
     $('message').hidden = true;
     // shop window + order card; `meta.you` is the viewer's seat (in the live game: the signed-in player's)
-    createPanels({ game, play, you: Number.isInteger(game.meta.you) ? game.meta.you : null }).then(made => { panels = made; }).catch(error => console.error(error));
+    createPanels({ game, play, you: Number.isInteger(game.meta.you) ? game.meta.you : null,
+      autoOpen: innerWidth > 760 || new URLSearchParams(location.search).get('buildings') === 'adaptive',
+    }).then(made => { panels = made; }).catch(error => console.error(error));
     play.following = !game.finished;
     // Open on active deliveries rather than asking spectators to wait through packing.
     // The entire recording, including the opening, remains available on the timeline.
@@ -142,7 +146,7 @@ function fit(wholeCity = false) {
   view.x = pad.l + (w - (x1 - x0) * view.scale) / 2 - x0 * view.scale;
   view.y = pad.t + (h - (y1 - y0) * view.scale) / 2 - y0 * view.scale;
   if (town.coverage && wholeCity !== true) {
-    view.scale *= 2.4;
+    view.scale *= town.coverage.kind === 'distributed-city-match' ? 1.2 : 2.4;
     view.x = pad.l + w / 2 - wx(1075100) * view.scale;
     view.y = pad.t + h / 2 - wy(5992100) * view.scale;
   }
@@ -263,6 +267,7 @@ function drawMap() {
   ctx.setTransform(s * view.dpr, 0, 0, s * view.dpr, view.x * view.dpr, view.y * view.dpr);
   ctx.fillStyle = '#c9d8ac';
   ctx.fill(paths.green);
+  if (paths.forest) ctx.fill(paths.forest);
   ctx.fillStyle = '#86b8c5';
   ctx.fill(paths.water);
   ctx.lineCap = ctx.lineJoin = 'round';
@@ -539,12 +544,16 @@ const host3d = $('world3d');
 async function setMode(next) {
   if (next === '3d' && !world3d) {
     $('view-3d').setAttribute('aria-busy', 'true');
-    loading3d ||= import('./view3d.js?v=14').then(m => m.createWorld3d({
-      host: host3d, overlay: ctx, view, town, game, play, wx, wy, truckAt, shopSign, labels: town.labels || MAP_LABELS,
+    await forestReady;
+    $('message').hidden = false;
+    $('message').textContent = new URLSearchParams(location.search).get('buildings') === 'adaptive' ?
+      'Preparing Oslo…' : 'Loading all Oslo buildings…';
+    loading3d ||= import('./view3d.js?v=17').then(m => m.createWorld3d({
+      host: host3d, overlay: ctx, view, town, game, play, wx, wy, truckAt, shopSign, labels: town.labels || MAP_LABELS, forest: forestSpots,
       constants: { OPEN, CLAIMED, DELIVERED, MISSED, PARKED, TRAIL, POP_TICKS, INK },
       selected: () => panels?.selectedOrder ?? null, onTap: choose, hover: pickAt,
     }));
-    try { world3d = await loading3d; }
+    try { world3d = await loading3d; $('message').hidden = true; }
     catch (error) { console.error(error); $('message').hidden = false; $('message').textContent = 'The 3D view could not start in this browser.'; setTimeout(() => { $('message').hidden = true; }, 3000); next = '2d'; }
     $('view-3d').removeAttribute('aria-busy');
   }
@@ -595,10 +604,28 @@ addEventListener('keydown', event => {
 });
 window.groceryView = { setMode, play, game, toWorld: (lon, lat) => [wx(lon), wy(lat)], get picks() { return mode === '3d' && world3d ? world3d.picks : picks; }, get panels() { return panels; }, get world3d() { return world3d; } };
 
+// Forest: the same spots as the 3D trees, painted green under them in 2D.
+let forestSpots = [], forestReady = null;
+function growForest() {
+  if (new URLSearchParams(location.search).get('forest') === '0') return;
+  const meta = () => game.meta ? Promise.resolve() : new Promise(done => setTimeout(() => done(meta()), 150));
+  forestReady = meta().then(() => Promise.all([
+    fetch('data/buildings.json?v=17').then(res => res.ok ? res.json() : null),
+    fetch('data/landcover.json?v=17').then(res => res.ok ? res.json() : null),
+  ]).then(([extra, cover]) => {
+    if (!extra || !cover) return;
+    forestSpots = plantForest({ town, buildings: extra.buildings, cover, wx, wy,
+      shops: (game.meta?.players || []).map(p => [wx(p.shop[0]), wy(p.shop[1])]) });
+    paths.forest = forestPath(forestSpots);
+    mapKey = '';
+  })).catch(error => console.error(error));
+}
+
 async function start() {
   document.querySelector('.g-mark').innerHTML = botSvg(DEFAULT_LOOK);
+  $('building-mode-label').textContent = 'All buildings resident';
   if (!code) { $('message').textContent = 'This link has no game code.'; return; }
-  town = await fetch('data/game-map.json?v=14').then(res => res.json());
+  town = await fetch('data/game-map.json?v=17').then(res => res.json());
   // per-town maps (tools/build-town-game-map.py) carry their own name and labels; Kongsberg's do not
   if (town.name) {
     const [west, south, east, north] = town.bounds;

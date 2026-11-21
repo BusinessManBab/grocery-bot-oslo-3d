@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#c8102e">
 <meta name="robots" content="noindex">
-<meta name="description" content="Explore 85 km² of Oslo with real hills, spruce forests and neighbourhoods from Bygdøy to Ekeberg. Watch 12 competing AIs in the central match.">
+<meta name="description" content="Explore Oslo with every building resident in 3D. Twelve AIs operate from real grocery-store locations across the city, serving 398 delivery homes.">
 <title>Grocery Bot Oslo Map</title>
 <link rel="icon" href="static/assets/grocery-bot-icon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="static/fonts.css">
@@ -13,8 +13,8 @@
 <link rel="stylesheet" href="static/game.css">
 <link rel="stylesheet" href="static/game-view.css">
 <link rel="stylesheet" href="static/view-toggle.css">
-<link rel="stylesheet" href="static/explore.css?v=14">
-<link rel="stylesheet" href="static/panels.css?v=14">
+<link rel="stylesheet" href="static/explore.css?v=17">
+<link rel="stylesheet" href="static/panels.css?v=17">
 <script src="static/grocery-bot.js"></script>
 <script type="importmap">
 { "imports": {
@@ -22,7 +22,7 @@
   "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
 } }
 </script>
-<script type="module" src="src/game-view.js?v=14"></script>
+<script type="module" src="src/game-view.js?v=17"></script>
 </head>
 <body class="game-page">
 <canvas class="g-map" id="terrain" aria-hidden="true"></canvas>
@@ -68,7 +68,7 @@
 <nav class="g-explore" aria-label="Explore Oslo">
   <select id="explore-place" aria-label="Fly to an Oslo district">
     <option value="">Explore Oslo</option>
-    <option value="10.751,59.921">City centre · AI match</option>
+    <option value="10.751,59.921">City centre</option>
     <option value="10.700,59.927">Frogner &amp; Vigeland</option>
     <option value="10.679,59.904">Bygdøy</option>
     <option value="10.683,59.924">Skøyen</option>
@@ -87,12 +87,14 @@
   <button type="button" id="zoom-out" aria-label="Zoom out">−</button>
   <button type="button" id="zoom-in" aria-label="Zoom in">+</button>
 </nav>
+<p class="g-building-mode"><strong id="building-mode-label">All buildings resident</strong> · complete geometry</p>
 <section class="g-shop" id="shopwin" hidden aria-labelledby="shop-title">
   <header>
     <span class="g-shop-face" id="shop-face" aria-hidden="true"></span>
     <h2 id="shop-title">Your shop</h2>
     <button class="g-x" id="shop-close" type="button" aria-label="Close the shop view">×</button>
   </header>
+  <p class="g-shop-location" id="shop-location" hidden></p>
   <svg class="g-shop-svg" id="shop-svg" role="img" aria-label="Robots picking orders and loading trucks inside the shop"></svg>
   <p class="g-shop-foot" id="shop-foot"></p>
 </section>

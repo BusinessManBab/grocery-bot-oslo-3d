@@ -7,7 +7,8 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
   const browser = await chromium.launch({
     headless: true,
     executablePath: process.env.CHROMIUM_PATH || undefined,
-    args: ['--no-sandbox', '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'],
+    args: ['--no-sandbox', '--disable-dev-shm-usage', '--js-flags=--max-old-space-size=768',
+      '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'],
   });
   try {
     for (const [name, viewport] of [
@@ -22,6 +23,7 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
       await page.evaluate(() => { groceryView.play.paused = true; groceryView.play.head = 240; });
       await page.waitForFunction(() => document.getElementById('tick').textContent.includes('240'));
       assert.equal(await page.locator('.g-row').count(), 12);
+      if (!await page.locator('#shop-close').isVisible()) await page.evaluate(() => groceryView.panels.showShop(2));
       // Every standings seat must reopen and switch its shop, including scrolled rows.
       for (let seat = 0; seat < 12; seat++) {
         await page.locator('#shop-close').click();
@@ -54,9 +56,14 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
         world.scene.traverse(object => {
           if (object.isMesh && object.visible && [20, 21].includes(object.renderOrder) && frustum.intersectsObject(object)) vertices += object.geometry.attributes.position.count;
         });
-        return { buildingVertices: vertices, drawCalls: world.renderer.info.render.calls };
+        const context = world.scene.children.filter(o => o.isMesh && o.renderOrder === 20);
+        return { buildingVertices: vertices, drawCalls: world.renderer.info.render.calls,
+          mode: world.buildingMode, stats: world.buildingStats, meshes: context.length,
+          resident: context.length > 0 && context.every(o => o.visible && !o.frustumCulled), uuids: context.map(o => o.geometry.uuid) };
       });
-      assert(geometry.buildingVertices <= 650000, JSON.stringify(geometry));
+      assert.equal(geometry.mode, 'all');
+      assert(geometry.meshes >= 1);
+      assert(geometry.resident && geometry.stats.count > 54000);
       const trees = await page.evaluate(() => groceryView.world3d.treeCounts);
       assert(trees.forest > 1000 && trees.parks > 500, JSON.stringify(trees));
       await page.selectOption('#explore-place', '10.774,59.890');
@@ -65,12 +72,31 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
         return Math.hypot(groceryView.world3d.controls.target.x - x, groceryView.world3d.controls.target.z - z) < 10;
       }, null, { timeout: 90000 });
       await page.screenshot({ path: `/tmp/opencode/oslo-${name}-ekeberg.png`, timeout: 120000 });
+      const residency = await page.evaluate(() => {
+        const context = groceryView.world3d.scene.children.filter(o => o.isMesh && o.renderOrder === 20);
+        return context.length === geometry.meshes && context.every(o => o.visible && !o.frustumCulled) &&
+          context.map(o => o.geometry.uuid).join(',') === geometry.uuids.join(',');
+      });
+      assert(residency);
       await page.locator('#city-overview').click();
       await page.waitForFunction(() => groceryView.world3d.camera.position.distanceTo(groceryView.world3d.controls.target) > 10000, null, { timeout: 90000 });
       await page.screenshot({ path: `/tmp/opencode/oslo-${name}-3d.png`, timeout: 120000 });
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
       assert.deepEqual(errors, []);
-      console.log(`${name}: PASS — 12 standings/shop selections, order card, 2D, 3D, forests, district flight, overview`, geometry, trees);
+      const timing = await page.evaluate(() => new Promise(resolve => {
+        let first = 0, previous = 0; const samples = [];
+        const measure = now => {
+          if (!first) first = now;
+          if (previous) samples.push(now - previous);
+          previous = now;
+          if (now - first < 3000) return requestAnimationFrame(measure);
+          const gl = groceryView.world3d.renderer.getContext(), debug = gl.getExtension('WEBGL_debug_renderer_info');
+          resolve({ softwareWebGL: true, fps: Math.round(samples.length * 1000 / samples.reduce((a, b) => a + b, 0)),
+            renderer: debug ? gl.getParameter(debug.UNMASKED_RENDERER_WEBGL) : 'unknown' });
+        };
+        requestAnimationFrame(measure);
+      }));
+      console.log(`${name}: PASS — real stores, full-building residency, district flight, overview`, geometry, trees, timing);
       await page.close();
     }
     const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
