@@ -22,12 +22,12 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
     page.on('pageerror', e => { errors.push(e.message); console.error(e.message); });
     await page.route('**/data/game.json*', route => route.fulfill({ contentType: 'application/json', body: JSON.stringify(replay) }));
     await page.goto('http://localhost:8138/?view=3d&buildings=all', { waitUntil: 'networkidle', timeout: 120000 });
-    await page.waitForFunction(() => groceryView.world3d && groceryView.panels, null, { timeout: 180000 });
+    await page.waitForFunction(() => groceryView.world3d?.cityDone && groceryView.panels, null, { timeout: 180000 });
     await page.evaluate(() => { groceryView.play.paused = true; groceryView.panels.closeShop(); });
     const before = await page.evaluate(() => {
       const world = groceryView.world3d, meshes = world.scene.children.filter(o => o.isMesh && o.renderOrder === 20);
       return { mode: world.buildingMode, stats: world.buildingStats, meshes: meshes.length,
-        resident: meshes.length > 0 && meshes.every(m => m.visible && !m.frustumCulled), uuids: meshes.map(m => m.geometry.uuid) };
+        resident: meshes.length > 0 && meshes.every(m => m.visible), uuids: meshes.map(m => m.geometry.uuid) };
     });
     assert.equal(before.mode, 'all');
     assert(before.resident && before.stats.count > 54000);

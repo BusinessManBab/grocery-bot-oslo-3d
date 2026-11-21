@@ -2,7 +2,7 @@
 // order card (left: what a clicked order is, how long ago, how happy). Both read data/shop.json
 // and data/shop.bin, recorded from the engine alongside the public feed (tools/simulate_match.py).
 import { botSvg } from './looks.js';
-import { createIsoShop } from './shop-iso.js?v=17';
+import { createIsoShop } from './shop-iso.js?v=18';
 
 const $ = id => document.getElementById(id);
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
@@ -22,8 +22,8 @@ const STATUS = {
 
 export async function createPanels({ game, play, you, autoOpen = true }) {
   const [data, bin] = await Promise.all([
-    fetch('data/shop.json?v=17').then(res => res.ok ? res.json() : null),
-    fetch('data/shop.bin?v=17').then(res => res.ok ? res.arrayBuffer() : null),
+    fetch('data/shop.json?v=18').then(res => res.ok ? res.json() : null),
+    fetch('data/shop.bin?v=18').then(res => res.ok ? res.arrayBuffer() : null),
   ]).catch(() => [null, null]);
   if (!data || !bin) return null;               // towns without recorded shop data: no panels
   const frames = new Uint8Array(bin);

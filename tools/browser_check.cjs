@@ -1,5 +1,6 @@
 // PLAYWRIGHT_MODULE=/path/to/playwright node tools/browser_check.cjs
-// Uses software WebGL for correctness checks, NOT a laptop GPU performance benchmark.
+// Uses software WebGL for correctness checks, NOT a laptop GPU performance benchmark (tools/load_benchmark.cjs
+// measures load time, memory and frame rate). Chunks are frustum-culled by the GPU, never hidden or swapped.
 const assert = require('node:assert/strict');
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 
@@ -47,7 +48,7 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
       await page.keyboard.press('Escape');
       await page.screenshot({ path: `/tmp/opencode/oslo-${name}-2d.png` });
       await page.locator('#view-3d').click();
-      await page.waitForFunction(() => groceryView.world3d && document.body.classList.contains('is-3d'), null, { timeout: 120000 });
+      await page.waitForFunction(() => groceryView.world3d?.cityDone && document.body.classList.contains('is-3d'), null, { timeout: 120000 });
       const geometry = await page.evaluate(async () => {
         const world = groceryView.world3d;
         const { Frustum, Matrix4 } = await import('three');
@@ -59,10 +60,10 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
         const context = world.scene.children.filter(o => o.isMesh && o.renderOrder === 20);
         return { buildingVertices: vertices, drawCalls: world.renderer.info.render.calls,
           mode: world.buildingMode, stats: world.buildingStats, meshes: context.length,
-          resident: context.length > 0 && context.every(o => o.visible && !o.frustumCulled), uuids: context.map(o => o.geometry.uuid) };
+          resident: context.length > 0 && context.every(o => o.visible), uuids: context.map(o => o.geometry.uuid) };
       });
       assert.equal(geometry.mode, 'all');
-      assert(geometry.meshes >= 1);
+      assert.equal(geometry.meshes, geometry.stats.contextDrawCalls);
       assert(geometry.resident && geometry.stats.count > 54000);
       const trees = await page.evaluate(() => groceryView.world3d.treeCounts);
       assert(trees.forest > 1000 && trees.parks > 500, JSON.stringify(trees));
@@ -72,11 +73,11 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
         return Math.hypot(groceryView.world3d.controls.target.x - x, groceryView.world3d.controls.target.z - z) < 10;
       }, null, { timeout: 90000 });
       await page.screenshot({ path: `/tmp/opencode/oslo-${name}-ekeberg.png`, timeout: 120000 });
-      const residency = await page.evaluate(() => {
+      const residency = await page.evaluate(geometry => {
         const context = groceryView.world3d.scene.children.filter(o => o.isMesh && o.renderOrder === 20);
-        return context.length === geometry.meshes && context.every(o => o.visible && !o.frustumCulled) &&
+        return context.length === geometry.meshes && context.every(o => o.visible) &&
           context.map(o => o.geometry.uuid).join(',') === geometry.uuids.join(',');
-      });
+      }, geometry);
       assert(residency);
       await page.locator('#city-overview').click();
       await page.waitForFunction(() => groceryView.world3d.camera.position.distanceTo(groceryView.world3d.controls.target) > 10000, null, { timeout: 90000 });
@@ -101,7 +102,7 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
     }
     const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
     await page.goto(process.env.PREVIEW_URL || 'http://localhost:8138/', { waitUntil: 'networkidle' });
-    await page.waitForFunction(() => groceryView.world3d && groceryView.panels?.seat === 2 &&
+    await page.waitForFunction(() => groceryView.world3d?.cityDone && groceryView.panels?.seat === 2 &&
       document.body.classList.contains('is-3d'), null, { timeout: 120000 });
     await page.screenshot({ path: '/tmp/opencode/oslo-default-3d.png', timeout: 120000 });
     console.log('Default entry: PASS — active 3D replay with Your shop open');

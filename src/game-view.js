@@ -1,11 +1,29 @@
 // Preview build of the live /game/CODE page (prototypes/town-rush/game-view.js) with a 3D view added.
 import { MAP_LABELS } from './game-map-labels.js';
-import { forestPath, plantForest } from './forest.js?v=17';
+import { forestPath, unpackTrees } from './forest.js?v=18';
 import { COLORS, DEFAULT_LOOK, botSvg, cleanLook, truckSvg } from './looks.js';
-import { createPanels } from './panels.js?v=17';
+import { createPanels } from './panels.js?v=18';
 
 const $ = id => document.getElementById(id);
 const code = 'PREVIEW';
+const params = new URLSearchParams(location.search);
+const wants3d = params.get('view') !== '2d';
+// Start every download the first view needs at once, instead of one after another: the replay and
+// map now, and for the 3D view also its code, the terrain, the baked buildings and the trees.
+const early = new Map();
+function grab(url, kind) {
+  if (!early.has(url)) early.set(url, fetch(url).then(res => { if (!res.ok) throw new Error(`${url}: ${res.status}`); return res[kind](); }));
+  return early.get(url);
+}
+const firstGame = fetch('data/game.json?v=18').catch(() => null);
+grab('data/game-map.json?v=18', 'json');
+grab('data/trees.bin?v=18', 'arrayBuffer').catch(() => null);
+let view3dModule = null;
+if (wants3d) {
+  view3dModule = import('./view3d.js?v=18');
+  for (const [url, kind] of [['data/terrain.json?v=18', 'json'], ['data/terrain.bin?v=18', 'arrayBuffer'],
+    ['data/buildings.bin?v=18', 'arrayBuffer'], ['data/homes.json?v=18', 'json']]) grab(url, kind).catch(() => null);
+}
 const canvas = $('map'), ctx = canvas.getContext('2d');
 const terrain = $('terrain'), mapCtx = terrain.getContext('2d', { alpha: false });
 const shopSign = new Image();
@@ -78,8 +96,9 @@ function addFrames(frames) {
   }
 }
 
+let gameRequests = 0;
 async function load() {
-  const res = await fetch('data/game.json?v=17').catch(() => null);
+  const res = await (gameRequests++ ? fetch('data/game.json?v=18').catch(() => null) : firstGame);
   const body = res && res.ok ? await res.json().catch(() => null) : null;
   if (!body) {
     if (!game.meta) $('message').textContent = res && res.status === 404 ? 'This game has not started yet. It opens here the moment it starts.' : 'Could not reach the game. Trying again ...';
@@ -90,11 +109,7 @@ async function load() {
   addFrames(body.frames);
   game.finished = body.finished;
   if (first) {
-    $('message').hidden = true;
-    // shop window + order card; `meta.you` is the viewer's seat (in the live game: the signed-in player's)
-    createPanels({ game, play, you: Number.isInteger(game.meta.you) ? game.meta.you : null,
-      autoOpen: innerWidth > 760 || new URLSearchParams(location.search).get('buildings') === 'adaptive',
-    }).then(made => { panels = made; }).catch(error => console.error(error));
+    if (!wants3d) $('message').hidden = true;
     play.following = !game.finished;
     // Open on active deliveries rather than asking spectators to wait through packing.
     // The entire recording, including the opening, remains available on the timeline.
@@ -544,16 +559,23 @@ const host3d = $('world3d');
 async function setMode(next) {
   if (next === '3d' && !world3d) {
     $('view-3d').setAttribute('aria-busy', 'true');
-    await forestReady;
     $('message').hidden = false;
-    $('message').textContent = new URLSearchParams(location.search).get('buildings') === 'adaptive' ?
-      'Preparing Oslo…' : 'Loading all Oslo buildings…';
-    loading3d ||= import('./view3d.js?v=17').then(m => m.createWorld3d({
-      host: host3d, overlay: ctx, view, town, game, play, wx, wy, truckAt, shopSign, labels: town.labels || MAP_LABELS, forest: forestSpots,
+    $('message').textContent = 'Preparing Oslo…';
+    await forestReady;
+    loading3d ||= (view3dModule || import('./view3d.js?v=18')).then(m => m.createWorld3d({
+      host: host3d, overlay: ctx, view, town, game, play, wx, wy, truckAt, shopSign, labels: town.labels || MAP_LABELS, trees, grab, paths,
       constants: { OPEN, CLAIMED, DELIVERED, MISSED, PARKED, TRAIL, POP_TICKS, INK },
       selected: () => panels?.selectedOrder ?? null, onTap: choose, hover: pickAt,
+      onProgress: buildingProgress,
+      onContextLost: () => { $('message').hidden = false; $('message').textContent = 'The graphics memory was reset. Reloading…'; setTimeout(() => location.reload(), 800); },
     }));
-    try { world3d = await loading3d; $('message').hidden = true; }
+    try {
+      world3d = await loading3d;
+      $('message').hidden = true;
+      world3d.ready.then(stats => {
+        $('building-mode-label').textContent = `All ${stats.count.toLocaleString('en-US')} buildings resident`;
+      }).catch(error => console.error(error));
+    }
     catch (error) { console.error(error); $('message').hidden = false; $('message').textContent = 'The 3D view could not start in this browser.'; setTimeout(() => { $('message').hidden = true; }, 3000); next = '2d'; }
     $('view-3d').removeAttribute('aria-busy');
   }
@@ -604,28 +626,36 @@ addEventListener('keydown', event => {
 });
 window.groceryView = { setMode, play, game, toWorld: (lon, lat) => [wx(lon), wy(lat)], get picks() { return mode === '3d' && world3d ? world3d.picks : picks; }, get panels() { return panels; }, get world3d() { return world3d; } };
 
-// Forest: the same spots as the 3D trees, painted green under them in 2D.
-let forestSpots = [], forestReady = null;
+// Forest: the same spots as the 3D trees, painted green under them in 2D. Planted once by
+// tools/bake_trees.cjs (data/trees.bin) rather than on every visit.
+let trees = { forest: [], parks: [] }, forestReady = null;
 function growForest() {
-  if (new URLSearchParams(location.search).get('forest') === '0') return;
-  const meta = () => game.meta ? Promise.resolve() : new Promise(done => setTimeout(() => done(meta()), 150));
-  forestReady = meta().then(() => Promise.all([
-    fetch('data/buildings.json?v=17').then(res => res.ok ? res.json() : null),
-    fetch('data/landcover.json?v=17').then(res => res.ok ? res.json() : null),
-  ]).then(([extra, cover]) => {
-    if (!extra || !cover) return;
-    forestSpots = plantForest({ town, buildings: extra.buildings, cover, wx, wy,
-      shops: (game.meta?.players || []).map(p => [wx(p.shop[0]), wy(p.shop[1])]) });
-    paths.forest = forestPath(forestSpots);
+  if (params.get('forest') === '0') return;
+  forestReady = grab('data/trees.bin?v=18', 'arrayBuffer').then(buffer => {
+    trees = unpackTrees(buffer);
+    paths.forest = forestPath(trees.forest);
     mapKey = '';
-  })).catch(error => console.error(error));
+  }).catch(error => console.error(error));
+}
+
+// "Building Oslo: 12,400 / 54,326" while the city workers stream the chunks in
+function buildingProgress(count, total) {
+  const label = $('building-mode-label');
+  if (count < total) label.textContent = `Building Oslo: ${count.toLocaleString('en-US')} / ${total.toLocaleString('en-US')}`;
+}
+
+function openPanels() {
+  // shop window + order card; `meta.you` is the viewer's seat (in the live game: the signed-in player's)
+  createPanels({ game, play, you: Number.isInteger(game.meta.you) ? game.meta.you : null,
+    autoOpen: innerWidth > 760 || params.get('buildings') === 'adaptive',
+  }).then(made => { panels = made; }).catch(error => console.error(error));
 }
 
 async function start() {
   document.querySelector('.g-mark').innerHTML = botSvg(DEFAULT_LOOK);
-  $('building-mode-label').textContent = 'All buildings resident';
+  $('building-mode-label').textContent = 'Every building resident once built';
   if (!code) { $('message').textContent = 'This link has no game code.'; return; }
-  town = await fetch('data/game-map.json?v=17').then(res => res.json());
+  town = await grab('data/game-map.json?v=18', 'json');
   // per-town maps (tools/build-town-game-map.py) carry their own name and labels; Kongsberg's do not
   if (town.name) {
     const [west, south, east, north] = town.bounds;
@@ -636,10 +666,14 @@ async function start() {
   origin = [(town.bounds[0] + town.bounds[2]) / 2, (town.bounds[1] + town.bounds[3]) / 2];
   squash = Math.cos(origin[1] / 1e5 * Math.PI / 180);
   buildPaths();
+  growForest();
   resize();
   requestAnimationFrame(frame);
   await load();
-  if (new URLSearchParams(location.search).get('view') !== '2d') setMode('3d');
+  while (!game.meta) await new Promise(resolve => setTimeout(resolve, 500));
+  // The shop window's own data and drawing wait until the 3D view is up, so they do not compete with it.
+  if (wants3d) await setMode('3d');
+  openPanels();
 }
 
 start();

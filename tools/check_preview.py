@@ -48,7 +48,23 @@ for order in shop["orders"].values():
         delivered[order["history"][-1][2]] += 1
 assert all(n > 0 for n in delivered), delivered
 assert all(len(frame["p"]) == 12 and all(len(p[4]) == 15 for p in frame["p"]) for frame in game["frames"])
+# baked files the 3D view loads instead of buildings.json / landcover.json: present and up to date
+def baked(name, sources):
+    raw = (DATA / name).read_bytes()
+    size = int.from_bytes(raw[:4], "little")
+    header = json.loads(raw[4:4 + size])
+    digest = hashlib.sha256(b"".join((DATA / s).read_bytes() for s in sources)).hexdigest()[:16]
+    assert header["source"] == digest, f"{name} is stale: rerun its bake (tools/bake_buildings.mjs, tools/bake_trees.cjs)"
+    return header
+bin_header = baked("buildings.bin", ["buildings.json", "game-map.json", "game.json"])
+assert bin_header["count"] > 54000 and sum(c[1] for c in bin_header["chunks"]) == bin_header["count"]
+assert bin_header["bounds"] == town["bounds"]
+assert load("homes.json")["homes"] == buildings["homes"]
+tree_header = baked("trees.bin", ["game-map.json", "buildings.json", "landcover.json", "game.json"])
+assert tree_header["forest"] > 1000 and tree_header["parks"] > 500, tree_header
 print(f"PASS: 12 real grocery-store locations, 60 trucks, 398 matching homes, {shop['ticks']} synchronized frames.")
 print(f"Shop separations: {min(separations):.0f}–{max(separations):.0f} m")
 print("Delivered per AI:", delivered)
 print("Terrain:", relief)
+print(f"Baked: {bin_header['count']} buildings in {sum(1 for c in bin_header['chunks'] if c[1])} chunks, "
+      f"{tree_header['forest']} forest + {tree_header['parks']} park trees")

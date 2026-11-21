@@ -20,13 +20,14 @@ Playback opens at tick 120 with deliveries in motion; scrub back or use `?t=0` f
   points are not presented as verified postal addresses. OpenStreetMap streets, parks and water,
   and Mapzen Terrarium elevation. Akerselva flows toward the fjord; the fjord is still.
 - Real building footprints, with 395/398 delivery homes matched to mapped buildings.
-  Background wall jogs under approximately 1.5–2.5 m are simplified at load time.
-  **The default version preloads every building's complete walls and roof**, in one
-  permanent indexed context mesh. No distance-based wall hiding, chunk loading or
-  geometry swapping occurs while moving the camera. The twelve shop buildings use
-  their mapped footprints with player-coloured roofs, not oversized generic stores.
-  There are approximately **54,800 buildings** in total. Real elevation
-  now spans **0–377 m**, on a **711 × 668** height grid.
+  Background wall jogs under approximately 1.5–2.5 m are simplified once, when the
+  buildings are baked (`tools/bake_buildings.mjs`).
+  **Every building's complete walls and roof are built and stay resident**: they stream in
+  nearest-first while the page opens and are all in place within seconds. No distance-based
+  wall hiding, level of detail or geometry swapping happens while moving the camera.
+  The twelve shop buildings use their mapped footprints with player-coloured roofs,
+  not oversized generic stores. There are **54,326 background buildings** plus the 398
+  delivery homes. Real elevation now spans **0–377 m**, on a **711 × 668** height grid.
 - **Cartoon buildings from the hills guide:** pitched roofs, chimneys, doors, apartment
   balconies, shop sign bands, industrial corrugation, garage doors, and a church spire.
   Styles come from OSM building types where available and a deterministic size/height
@@ -46,15 +47,48 @@ Playback opens at tick 120 with deliveries in motion; scrub back or use `?t=0` f
   Map, truck routes, customer homes and shop recordings are regenerated together.
 - Twelve distinct player colours; standings scroll to accommodate every competitor.
 
-## Full-building rendering
+## Loading and rendering
 
-- Every building's complete geometry remains resident and visible. There is no distance-based wall hiding, chunk swapping or detail pop-in.
-The full version uses indexed faces, one context-building draw call, a single
-vertex-coloured delivery-building mesh, shared materials, material-batched truck
-meshes, cached static shadows and a capped pixel ratio.
-Moving trucks do not trigger a city-wide shadow redraw. Building geometry stays the
-same regardless of zoom, district or camera direction. The one-time initial load is
-explicitly labelled. Browser residency is checked when run; software-WebGL timing is not a hardware-GPU 60-fps certification.
+The earlier version built all 54k buildings and 5 million road vertices on the page's main
+thread from an 8.8 MB JSON file. That froze the page for 30 s on a desktop and about two minutes
+on a 4× slower CPU, and peaked at ~1.4 GB, which is why it crashed on phones. Now:
+
+- **Baked data.** `data/buildings.bin` (0.76 MB over the wire instead of 1.8 MB, no JSON parsing)
+  holds the footprints already simplified, without the shop stores and sorted into a 6 × 6 grid
+  of chunks. `data/trees.bin` (0.2 MB) holds the 22k forest and 6k park trees, which used to be
+  planted at every visit by rasterizing every road and footprint.
+- **Built in workers, nearest first.** Up to four module workers (`src/world-worker.js`) build
+  the roads and then the building chunks closest to the camera, and hand back quantized,
+  indexed typed arrays (20 bytes per vertex instead of 44; int16 positions per chunk, int8
+  normals, uint8 colours). The page puts them straight on the GPU and drops its own copy.
+  Browsers without module workers build on the page, one chunk between frames.
+- **Fewer vertices, fewer draw calls.** Indexed faces and shared roof corners: 3.2M building
+  vertices instead of 4.7M. Road ribbons get mitred joins and are split only where the ground
+  needs it: 0.8M vertices instead of 4.9M. The delivery homes are one mesh per material
+  (instead of three draw calls per home), and each player's five trucks are instanced.
+- **Nothing stalls a frame.** Setup runs in short steps; shaders are compiled up front (in
+  parallel where the browser supports it), including those of chunks still being built. The
+  shadow map is redrawn at most twice a second while the camera moves, and at once when it rests.
+- **A lighter tier for phones and small machines** (`?quality=low|high` to force): no shadows,
+  a 2048 px ground texture, no MSAA, at most 1.25× resolution. A machine on the full tier that
+  still cannot hold ~25 fps once the city is in steps down to it by itself.
+- Every chunk stays resident once built; chunks off screen are skipped by GPU frustum culling,
+  never hidden or swapped. The label at the bottom left counts the buildings in as they arrive.
+
+Measured with `tools/load_benchmark.cjs` (headless Chrome on a GTX 1660 SUPER, same machine and
+replay for both; "4× CPU" is Chrome's CPU throttling, "phone" a 390 × 844 @3× touch viewport):
+
+| | Before (v17) | Now (v18) |
+|---|---|---|
+| 3D view on screen, desktop | 31.3 s | 2.9 s |
+| Every building resident, desktop | 31.3 s | 3.0 s |
+| Every building resident, desktop at 4× CPU | 124.5 s | 6.3 s |
+| Every building resident, phone at 4× CPU | 122.8 s | 6.6 s |
+| Longest frozen stretch of the page, desktop / 4× CPU | 28.7 s / 119 s | 0.5 s / 1.4 s |
+| Peak memory, renderer + GPU process (all runs) | 1.35–1.41 GB | 0.77–0.86 GB |
+| Frame rate at 4× CPU (start view, street level) | 10 / 20 fps | 30 / 60 fps |
+
+The 3D view itself is checked with `tools/browser_check.cjs` and `tools/full_building_probe.cjs`.
 
 ## Actual grocery locations
 
@@ -83,6 +117,8 @@ The exact POI identifiers and source URL are preserved in `data/layout.json`.
 python3 -m http.server 8138
 # http://localhost:8138/ (3D) or http://localhost:8138/?view=2d
 python3 tools/check_preview.py
+# load time, memory and frame rate, on a machine with a GPU (see the script's header):
+PLAYWRIGHT_MODULE=/path/to/playwright node tools/load_benchmark.cjs http://localhost:8138/ new --throttle 4 --phone
 ```
 
 ## Rebuild
@@ -99,7 +135,9 @@ python3 tools/build_city.py terrain --step 12
 .cache/build-venv/bin/python tools/spread_shops.py
 .cache/build-venv/bin/python tools/use_real_shops.py
 python3 tools/record_city.py .cache/town-rush /path/to/rush-ai 8
-python3 tools/check_preview.py
+node tools/bake_buildings.mjs                                     # data/buildings.bin + homes.json
+PLAYWRIGHT_MODULE=/path/to/playwright node tools/bake_trees.cjs   # data/trees.bin
+python3 tools/check_preview.py                                    # also fails if a bake is stale
 ```
 
 `prepare_oslo.py` copies the engine and build tools into `.cache/town-rush`, then

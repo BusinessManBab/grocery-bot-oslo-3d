@@ -20,6 +20,8 @@ yet, because there is no Oslo replay (see step 2).
 | `game.json` | One finished game played **on that same map** | The game server's `/api/games/CODE?since=0` (step 2) |
 | `buildings.json` | OSM building footprints, with each delivery home matched to its real building | `tools/build_city.py buildings` |
 | `terrain.bin` + `terrain.json` | Elevation grid over the map bounds | `tools/build_city.py terrain` |
+| `buildings.bin` + `homes.json` | What the 3D view actually loads: the background footprints simplified, without the shop stores, chunked and binary; the delivery homes | `node tools/bake_buildings.mjs` (step 4b) |
+| `trees.bin` | The forest and park trees, planted once | `node tools/bake_trees.cjs` (step 4b) |
 | `shop.json` + `shop.bin` | Inside the shops: robot positions, what they carry, truck loading; every order's items, address and timeline. Optional: without them the page simply has no shop window or order card | The full engine replay of the same game (see "Shop window and order card") |
 
 Everything else (`index.html`, `src/`, `static/`, `assets/`) stays as it is.
@@ -115,12 +117,27 @@ the bounds. It prints the height range: Kongsberg is 123–352 m and Oslo 0–10
 The tiles have seabed depths under the sea. The script clamps everything below 0 m to 0 m, so the
 sea surface stays flat.
 
+### 4b. Bake what the 3D view loads
+
+The page does not read `buildings.json` or `landcover.json` itself any more: building ~55k
+footprints and planting the forest at every visit froze phones for tens of seconds and ran them
+out of memory. Bake them once, after any change to the map, buildings, land cover or replay:
+
+```sh
+node tools/bake_buildings.mjs                                       # data/buildings.bin + homes.json
+PLAYWRIGHT_MODULE=/path/to/playwright node tools/bake_trees.cjs     # data/trees.bin (needs Chromium, no GPU)
+python3 tools/check_preview.py                                      # fails if either bake is stale
+```
+
+The 3D view then builds the buildings and roads in web workers (`src/world-worker.js`), nearest
+chunk first, straight into GPU-ready typed arrays.
+
 ### 5. Bump the cache version
 
 GitHub Pages' CDN serves old JavaScript for up to 10 minutes. Raise `?v=N` everywhere it appears:
 
 ```sh
-grep -rn "v=[0-9]" index.html src/game-view.js     # then raise N in both places
+grep -rln "v=[0-9]" index.html src/     # then raise N everywhere it appears
 ```
 
 ### 6. Look at it locally
