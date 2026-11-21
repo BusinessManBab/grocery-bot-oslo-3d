@@ -7,6 +7,10 @@ load = lambda name: json.loads((DATA / name).read_text())
 town, graph, game, shop, relief, buildings = map(load, (
     "game-map.json", "map.json", "game.json", "shop.json", "terrain.json", "buildings.json"))
 assert town["town"] == "oslo"
+assert town["coverage"]["kind"] == "expanded-exploration"
+core = town["coverage"]["playBounds"]
+assert (town["bounds"][2] - town["bounds"][0]) * (town["bounds"][3] - town["bounds"][1]) > 4 * (core[2] - core[0]) * (core[3] - core[1])
+assert len(load("landcover.json")["wood"]) > 0
 assert graph["id"] == "oslo-expanded-preview-v1"
 assert len(graph["shops"]) == len(game["meta"]["players"]) == shop["seats"] == 12
 assert len({s["node"] for s in graph["shops"]}) == 12

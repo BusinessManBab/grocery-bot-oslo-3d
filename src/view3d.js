@@ -25,10 +25,11 @@ export async function createWorld3d(opts) {
   let picks = [];                           // this frame's clickable shops and order houses, in screen pixels
   const { OPEN, DELIVERED, PARKED, TRAIL, POP_TICKS, INK } = opts.constants;
   const [extra, relief, heights] = await Promise.all([
-    fetch('data/buildings.json').then(res => res.json()),
-    fetch('data/terrain.json').then(res => res.json()),
-    fetch('data/terrain.bin').then(res => res.arrayBuffer()).then(buf => new Uint16Array(buf)),
+    fetch('data/buildings.json?v=14').then(res => res.json()),
+    fetch('data/terrain.json?v=14').then(res => res.json()),
+    fetch('data/terrain.bin?v=14').then(res => res.arrayBuffer()).then(buf => new Uint16Array(buf)),
   ]);
+  const cover = await fetch('data/landcover.json?v=14').then(res => res.ok ? res.json() : null).catch(() => null) || { wood: [], open: [] };
 
   // ---- renderer, scene, camera ------------------------------------------------
   const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
@@ -143,10 +144,20 @@ export async function createWorld3d(opts) {
   ];
   function buildRoads() {
     roadLayers.forEach(([kind, half, colour], i) => {
-      const mesh = new THREE.Mesh(ribbons(town.roads[kind], half, .5 + i * .05), draped(colour));
-      mesh.receiveShadow = true;
-      mesh.renderOrder = 2 + i;
-      scene.add(mesh);
+      const chunks = new Map(), material = draped(colour);
+      for (const line of town.roads[kind]) {
+        const middle = Math.floor(line.length / 4) * 2;
+        const key = `${Math.floor(wx(line[middle]) / 650)},${Math.floor(wy(line[middle + 1]) / 650)}`;
+        if (!chunks.has(key)) chunks.set(key, []);
+        chunks.get(key).push(line);
+      }
+      for (const lines of chunks.values()) {
+        const mesh = new THREE.Mesh(ribbons(lines, half, .5 + i * .05), material);
+        mesh.geometry.computeBoundingSphere();
+        mesh.receiveShadow = true;
+        mesh.renderOrder = 2 + i;
+        scene.add(mesh);
+      }
     });
   }
 
@@ -227,12 +238,13 @@ export async function createWorld3d(opts) {
   // Buildings under a shop (often the real store) make way for the shop model, as on the 2D map.
   const PLAZA = 100;
   const nearShop = (x, z, r = PLAZA) => game.players.some(p => Math.hypot(p.shop[0] - x, p.shop[1] - z) < r);
-  // Dense Oslo has almost a million raw context-building vertices. Remove tiny wall
-  // jogs once at load, in metre-scaled coordinates; never simplify delivery homes.
+  // Dense, expanded Oslo has millions of raw context-building vertices. Remove tiny
+  // wall jogs once at load, in metre-scaled coordinates; never simplify delivery homes.
   function contextOutline(flat) {
     const pts = [];
     for (let i = 0; i < flat.length; i += 2) pts.push([flat[i], flat[i + 1]]);
     const sq = Math.cos((b1 + b3) / 2 / 1e5 * Math.PI / 180);
+    const tolerance = Math.hypot(wx(flat[0]) - wx(1075100), wy(flat[1]) - wy(5992100)) > 2600 ? 2.5 : 1.5;
     let changed = true;
     while (changed && pts.length > 4) {
       changed = false;
@@ -240,7 +252,7 @@ export async function createWorld3d(opts) {
         const a = pts[(i + pts.length - 1) % pts.length], p = pts[i], b = pts[(i + 1) % pts.length];
         const dx = (b[0] - a[0]) * sq, dy = b[1] - a[1], px = (p[0] - a[0]) * sq, py = p[1] - a[1];
         const t = clamp((px * dx + py * dy) / (dx * dx + dy * dy || 1), 0, 1);
-        if (Math.hypot(px - t * dx, py - t * dy) * 1.113 <= 1.5) {
+        if (Math.hypot(px - t * dx, py - t * dy) * 1.113 <= tolerance) {
           pts.splice(i, 1);
           changed = true;
           break;
@@ -249,19 +261,40 @@ export async function createWorld3d(opts) {
     }
     return pts.flat();
   }
+  const buildingChunks = new Map();
   {
-    const parts = { walls: [], roof: [] };
     for (const b of extra.buildings) {
       let hit = false;
       for (let i = 1; i < b.length && !hit; i += 2) hit = nearShop(wx(b[i]), wy(b[i + 1]));
       if (hit) continue;
       const h = b[0] * M * LIFT;
-      prism(contextOutline(b.slice(1)), h, parts);
+      const outline = contextOutline(b.slice(1));
+      let x = 0, z = 0;
+      for (let i = 0; i < outline.length; i += 2) { x += wx(outline[i]); z += wy(outline[i + 1]); }
+      x /= outline.length / 2; z /= outline.length / 2;
+      const key = `${Math.floor(x / 650)},${Math.floor(z / 650)}`;
+      if (!buildingChunks.has(key)) buildingChunks.set(key, { x, z, parts: { walls: [], roof: [] } });
+      prism(outline, h, buildingChunks.get(key).parts);
     }
-    const mesh = new THREE.Mesh(prismGeometry(parts, false), litBoth(PALETTE.town));
-    mesh.castShadow = mesh.receiveShadow = true;
-    mesh.renderOrder = 20;
-    scene.add(mesh);
+    const material = litBoth(PALETTE.town);
+    for (const chunk of buildingChunks.values()) {
+      // Roof silhouettes remain visible city-wide. Wall detail is local to the
+      // neighbourhood being explored, not redrawn for every distant suburb.
+      for (const key of ['walls', 'roof']) {
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute('position', new THREE.Float32BufferAttribute(chunk.parts[key], 3));
+        geometry.computeVertexNormals();
+        geometry.computeBoundingSphere();
+        const mesh = new THREE.Mesh(geometry, material);
+        mesh.castShadow = key === 'walls';
+        mesh.receiveShadow = true;
+        mesh.renderOrder = 20;
+        mesh.userData.buildingDetail = key;
+        scene.add(mesh);
+        chunk[key] = mesh;
+      }
+      delete chunk.parts;
+    }
   }
 
   // Order homes: the real footprint at each address the game delivers to.
@@ -476,9 +509,20 @@ export async function createWorld3d(opts) {
     }
   }
   const RAMP = 26;
+  const bridgeBuckets = new Map(), BRIDGE_CELL = 160;
+  for (const br of bridges) {
+    const margin = RAMP + br.half + 4;
+    const x0 = Math.floor((Math.min(br.ax, br.bx) - margin) / BRIDGE_CELL), x1 = Math.floor((Math.max(br.ax, br.bx) + margin) / BRIDGE_CELL);
+    const z0 = Math.floor((Math.min(br.az, br.bz) - margin) / BRIDGE_CELL), z1 = Math.floor((Math.max(br.az, br.bz) + margin) / BRIDGE_CELL);
+    for (let z = z0; z <= z1; z++) for (let x = x0; x <= x1; x++) {
+      const key = `${x},${z}`;
+      if (!bridgeBuckets.has(key)) bridgeBuckets.set(key, []);
+      bridgeBuckets.get(key).push(br);
+    }
+  }
   function deckAt(x, z) {
     let best = -Infinity;
-    for (const br of bridges) {
+    for (const br of bridgeBuckets.get(`${Math.floor(x / BRIDGE_CELL)},${Math.floor(z / BRIDGE_CELL)}`) || []) {
       const dx = br.bx - br.ax, dz = br.bz - br.az, t = ((x - br.ax) * dx + (z - br.az) * dz) / (br.length * br.length);
       const side = Math.abs((x - br.ax) * dz - (z - br.az) * dx) / br.length;
       if (side > br.half + 3) continue;
@@ -583,25 +627,35 @@ export async function createWorld3d(opts) {
     streakGeo.attributes.color.needsUpdate = true;
   }
 
-  // ---- trees in the parks and woods (decoration, seeded so every visit looks the same) ----
+  // ---- reference-style park trees and spruce/birch woodland --------------------------
+  // Rasterized land cover makes the bigger city cheap to seed. No "empty land =
+  // forest" fallback: Oslo's unmapped squares may be yards, quays or parking lots.
+  const blockedLand = roadMask();
+  function landMask(polygons) {
+    const canvas = document.createElement('canvas');
+    canvas.width = wcols; canvas.height = wrows;
+    const g = canvas.getContext('2d', { willReadFrequently: true });
+    g.setTransform(1 / WC, 0, 0, 1 / WC, -X0 / WC, -Z0 / WC);
+    g.fill(area(polygons));
+    const pixels = g.getImageData(0, 0, wcols, wrows).data;
+    const mask = new Uint8Array(wcols * wrows);
+    for (let i = 0; i < mask.length; i++) mask[i] = pixels[i * 4 + 3] > 127 ? 1 : 0;
+    return (x, z) => { const i = cellOf(x, z); return i >= 0 && mask[i] === 1; };
+  }
+  const wooded = landMask(cover.wood), park = landMask(town.green);
+  let parkTreeCount = 0, forestTreeCount = 0;
   {
     let seed = 7;
     const rand = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
-    const blocked = roadMask();
-    const polys = town.green.map(p => {
-      const pts = [];
-      for (let i = 0; i < p.length; i += 2) pts.push([wx(p[i]), wy(p[i + 1])]);
-      const xs = pts.map(q => q[0]), zs = pts.map(q => q[1]);
-      return { pts, box: [Math.min(...xs), Math.min(...zs), Math.max(...xs), Math.max(...zs)] };
-    });
     const spots = [];
-    for (let tries = 0; tries < 60000 && spots.length < 1800; tries++) {
+    for (let tries = 0; tries < 200000 && spots.length < 6000; tries++) {
       const x = X0 + rand() * W, z = Z0 + rand() * D;
-      if (blocked(x, z)) continue;
+      if (blockedLand(x, z) || wooded(x, z)) continue;
       if (isWater(x, z) || isWater(x + 9, z) || isWater(x - 9, z) || isWater(x, z + 9) || isWater(x, z - 9)) continue;
-      if (!polys.some(p => x >= p.box[0] && x <= p.box[2] && z >= p.box[1] && z <= p.box[3] && inside([x, z], p.pts))) continue;
+      if (!park(x, z)) continue;
       spots.push([x, z, .7 + rand() * .7, rand()]);
     }
+    parkTreeCount = spots.length;
     const trunk = new THREE.CylinderGeometry(.9, 1.2, 6, 5).translate(0, 3, 0);
     const crown = new THREE.IcosahedronGeometry(6, 0).translate(0, 10, 0);
     const trunks = new THREE.InstancedMesh(trunk, lit('#8a6d4f'), spots.length);
@@ -617,6 +671,39 @@ export async function createWorld3d(opts) {
     for (const mesh of [trunks, crowns]) { mesh.castShadow = true; mesh.renderOrder = 22; scene.add(mesh); }
   }
 
+  {
+    let seed = 23;
+    const rand = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+    const forest = [], STEP = 13;
+    // Sample uniformly over the full map (a north-to-south cap would leave the
+    // southern Ekeberg/Bygdøy woods bare when the instance budget is reached).
+    const attempts = Math.ceil(W * D / (STEP * STEP));
+    for (let i = 0; i < attempts && forest.length < 32000; i++) {
+      const x = X0 + 12 + rand() * (W - 24), z = Z0 + 12 + rand() * (D - 24);
+      if (!wooded(x, z) || blockedLand(x, z)) continue;
+      if (isWater(x, z) || isWater(x + 8, z) || isWater(x - 8, z) || isWater(x, z + 8) || isWater(x, z - 8)) continue;
+      forest.push([x, z, .8 + rand() * .7, rand(), rand() < .78]);
+    }
+    forestTreeCount = forest.length;
+    const m = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0);
+    const plant = (list, crownGeo, trunkGeo, shades) => {
+      const trunks = new THREE.InstancedMesh(trunkGeo, lit('#7d6450'), list.length);
+      const crowns = new THREE.InstancedMesh(crownGeo, lit('#ffffff'), list.length);
+      const colours = shades.map(c => new THREE.Color(c));
+      list.forEach(([x, z, sc, r], i) => {
+        q.setFromAxisAngle(up, r * 6.28);
+        m.compose(new THREE.Vector3(x, heightAt(x, z) - .5, z), q, new THREE.Vector3(sc, sc * (.9 + r * .35), sc));
+        trunks.setMatrixAt(i, m); crowns.setMatrixAt(i, m);
+        crowns.setColorAt(i, colours[i % colours.length]);
+      });
+      for (const mesh of [trunks, crowns]) { mesh.castShadow = true; mesh.renderOrder = 22; scene.add(mesh); }
+    };
+    plant(forest.filter(t => t[4]), new THREE.ConeGeometry(4.4, 13, 6).translate(0, 10, 0),
+      new THREE.CylinderGeometry(.6, .8, 4, 4).translate(0, 2, 0), ['#6b8f5c', '#5f8553', '#779a69', '#668a58']);
+    plant(forest.filter(t => !t[4]), new THREE.IcosahedronGeometry(5, 0).translate(0, 9, 0),
+      new THREE.CylinderGeometry(.6, .8, 6, 4).translate(0, 3, 0), ['#9dbb7c', '#a9c48a', '#93b574']);
+  }
+
   function inside([x, y], ring) {
     let c = false;
     for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
@@ -627,21 +714,24 @@ export async function createWorld3d(opts) {
   }
 
   function roadMask() {
-    const cell = 4, cols = Math.ceil(W / cell), rows = Math.ceil(D / cell), grid = new Uint8Array(cols * rows);
-    const mark = (x, z, r) => {
-      const c0 = Math.floor((x - r - X0) / cell), c1 = Math.floor((x + r - X0) / cell);
-      const r0 = Math.floor((z - r - Z0) / cell), r1 = Math.floor((z + r - Z0) / cell);
-      for (let rr = Math.max(0, r0); rr <= Math.min(rows - 1, r1); rr++) for (let cc = Math.max(0, c0); cc <= Math.min(cols - 1, c1); cc++) grid[rr * cols + cc] = 1;
-    };
+    const cell = 4, cols = Math.ceil(W / cell), rows = Math.ceil(D / cell);
+    const canvas = document.createElement('canvas');
+    canvas.width = cols; canvas.height = rows;
+    const g = canvas.getContext('2d', { willReadFrequently: true });
+    g.setTransform(1 / cell, 0, 0, 1 / cell, -X0 / cell, -Z0 / cell);
+    g.lineWidth = 28; g.lineCap = g.lineJoin = 'round'; g.beginPath();
     for (const kind of ['lane', 'street', 'major']) for (const line of town.roads[kind]) {
-      for (let i = 2; i < line.length; i += 2) {
-        const ax = wx(line[i - 2]), az = wy(line[i - 1]), bx = wx(line[i]), bz = wy(line[i + 1]);
-        const steps = Math.ceil(Math.hypot(bx - ax, bz - az) / 3);
-        for (let s = 0; s <= steps; s++) mark(ax + (bx - ax) * s / steps, az + (bz - az) * s / steps, 14);
-      }
+      g.moveTo(wx(line[0]), wy(line[1]));
+      for (let i = 2; i < line.length; i += 2) g.lineTo(wx(line[i]), wy(line[i + 1]));
     }
-    for (const b of extra.buildings) mark(wx(b[1]), wy(b[2]), 10);
-    for (const p of game.players) mark(p.shop[0], p.shop[1], PLAZA + 10);
+    g.stroke();
+    // Full footprints, not just one corner: keep trees out of large city blocks.
+    const footprints = extra.buildings.map(b => b.slice(1)).concat(extra.homes.map(h => h.ring));
+    const path = area(footprints);
+    g.fill(path); g.lineWidth = 16; g.stroke(path);
+    for (const p of game.players) { g.beginPath(); g.arc(p.shop[0], p.shop[1], PLAZA + 10, 0, Math.PI * 2); g.fill(); }
+    const px = g.getImageData(0, 0, cols, rows).data, grid = new Uint8Array(cols * rows);
+    for (let i = 0; i < grid.length; i++) grid[i] = px[i * 4 + 3] > 0 ? 1 : 0;
     return (x, z) => grid[Math.floor((z - Z0) / cell) * cols + Math.floor((x - X0) / cell)] === 1;
   }
 
@@ -914,9 +1004,23 @@ export async function createWorld3d(opts) {
   }
 
   function home() {
-    const r = region();
-    const x = (r.x0 + r.x1) / 2, z = (r.z0 + r.z1) / 2;
-    return { target: new THREE.Vector3(x, heightAt(x, z), z), distance: fitDistance, polar: TILT, azimuth: 0 };
+    const x = wx(1075100), z = wy(5992100);
+    // Begin inside the city. The full 85 km² world continues beyond the screen.
+    const desktopDistance = 4400, phoneDistance = 5600;
+    return { target: new THREE.Vector3(x, heightAt(x, z), z),
+      distance: Math.min(fitDistance, size.w > 760 ? desktopDistance : phoneDistance), polar: .88, azimuth: -.12 };
+  }
+  function overview() {
+    const r = region(), x = (r.x0 + r.x1) / 2, z = (r.z0 + r.z1) / 2;
+    flyTo({ target: new THREE.Vector3(x, heightAt(x, z), z), distance: fitDistance, polar: TILT, azimuth: 0 });
+  }
+  function explore(lon, lat) {
+    const x = wx(lon * 1e5), z = wy(lat * 1e5), from = current();
+    flyTo({ ...from, target: new THREE.Vector3(x, heightAt(x, z), z), distance: size.w > 760 ? 2100 : 3300, polar: .9 });
+  }
+  function zoomBy(factor) {
+    const from = current();
+    flyTo({ ...from, distance: clamp(from.distance * factor, controls.minDistance, controls.maxDistance) }, 350);
   }
 
   // 2D <-> 3D hand-over: keep the same spot and zoom when switching views.
@@ -959,7 +1063,8 @@ export async function createWorld3d(opts) {
       // start straight down where the 2D map was, then tilt into 3D
       const start = view.touched || entered ? fromFlat() : { ...home(), polar: 0 };
       pose(start.target, start.distance, .001, 0);
-      flyTo({ ...start, polar: TILT, azimuth: entered ? start.azimuth : 0 }, 1200);
+      flyTo({ ...start, polar: view.touched || entered ? TILT : home().polar,
+        azimuth: entered ? start.azimuth : home().azimuth }, 1200);
       entered = true;
     } else {
       toFlat();
@@ -968,6 +1073,8 @@ export async function createWorld3d(opts) {
 
   // ---- per-frame --------------------------------------------------------------
   const tmp = new THREE.Vector3();
+  const detailFrustum = new THREE.Frustum(), detailProjection = new THREE.Matrix4(), detailQuaternion = new THREE.Quaternion();
+  let detailX = Infinity, detailZ = Infinity, detailDistance = 0;
   function project(x, y, z) {
     tmp.set(x, y, z).project(camera);
     if (tmp.z > 1 || tmp.z < -1) return null;
@@ -995,9 +1102,31 @@ export async function createWorld3d(opts) {
     }
     camera.position.y = Math.max(camera.position.y, heightAt(camera.position.x, camera.position.z) + 12);
     const distance = camera.position.distanceTo(controls.target);
+    // Atmospheric depth follows the current zoom, never a fixed small-map range.
+    scene.fog.near = distance * 1.45;
+    scene.fog.far = distance * 3;
+    if (Math.hypot(detailX - controls.target.x, detailZ - controls.target.z) > 80 ||
+        Math.abs(detailDistance - distance) > Math.max(80, detailDistance * .1) ||
+        Math.abs(detailQuaternion.dot(camera.quaternion)) < .999) {
+      detailX = controls.target.x; detailZ = controls.target.z; detailDistance = distance;
+      detailQuaternion.copy(camera.quaternion);
+      camera.updateMatrixWorld();
+      detailFrustum.setFromProjectionMatrix(detailProjection.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
+      const roofVertices = [...buildingChunks.values()].reduce((sum, chunk) =>
+        sum + (detailFrustum.intersectsObject(chunk.roof) ? chunk.roof.geometry.attributes.position.count : 0), 0);
+      let budget = Math.max(0, 625000 - roofVertices);
+      const chunks = [...buildingChunks.values()].sort((a, b) =>
+        Math.hypot(a.x - detailX, a.z - detailZ) - Math.hypot(b.x - detailX, b.z - detailZ));
+      for (const chunk of chunks) {
+        const vertices = chunk.walls.geometry.attributes.position.count;
+        chunk.walls.visible = distance < 8500 && detailFrustum.intersectsObject(chunk.roof) &&
+          Math.hypot(chunk.x - detailX, chunk.z - detailZ) < 1750 && vertices <= budget;
+        if (chunk.walls.visible) budget -= vertices;
+      }
+    }
     // Like the 2D sprites, actors grow more slowly than the map when you zoom in. Measured per
     // object, so a truck close to a low camera does not fill the screen.
-    const growAt = (x, z) => clamp((camera.position.distanceTo(tmp.set(x, heightAt(x, z), z)) / fitDistance) ** .65, .16, 1.25);
+    const growAt = (x, z) => clamp((camera.position.distanceTo(tmp.set(x, heightAt(x, z), z)) / 6200) ** .65, .16, 1.25);
 
     // sun follows the view so the shadow map stays sharp where you look
     const reach = clamp(distance * 1.1, 260, 2600);
@@ -1151,5 +1280,7 @@ export async function createWorld3d(opts) {
   resize();
   pose(home().target, fitDistance, TILT, 0);
   const flowAt = (x, z) => { const i = cellOf(x, z); return i < 0 || !flowSpeed[i] ? null : [flowX[i], flowZ[i], flowSpeed[i]]; };
-  return { render, setActive, flyHome: () => flyTo(home()), camera, controls, scene, renderer, flowAt, streaks: STREAKS, bridges, get picks() { return picks; } };
+  return { render, setActive, flyHome: () => flyTo(home()), overview, explore, zoomBy,
+    treeCounts: { parks: parkTreeCount, forest: forestTreeCount },
+    camera, controls, scene, renderer, flowAt, streaks: STREAKS, bridges, get picks() { return picks; } };
 }

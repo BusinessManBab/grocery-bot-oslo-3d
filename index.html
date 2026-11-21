@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#c8102e">
 <meta name="robots" content="noindex">
-<meta name="description" content="Expanded Oslo in 2D and 3D: 12 competing AIs, 60 trucks and 160 real delivery addresses on real terrain.">
+<meta name="description" content="Explore 85 km² of Oslo with real hills, spruce forests and neighbourhoods from Bygdøy to Ekeberg. Watch 12 competing AIs in the central match.">
 <title>Grocery Bot Oslo Map</title>
 <link rel="icon" href="static/assets/grocery-bot-icon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="static/fonts.css">
@@ -13,7 +13,8 @@
 <link rel="stylesheet" href="static/game.css">
 <link rel="stylesheet" href="static/game-view.css">
 <link rel="stylesheet" href="static/view-toggle.css">
-<link rel="stylesheet" href="static/panels.css?v=13">
+<link rel="stylesheet" href="static/explore.css?v=14">
+<link rel="stylesheet" href="static/panels.css?v=14">
 <script src="static/grocery-bot.js"></script>
 <script type="importmap">
 { "imports": {
@@ -21,7 +22,7 @@
   "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
 } }
 </script>
-<script type="module" src="src/game-view.js?v=13"></script>
+<script type="module" src="src/game-view.js?v=14"></script>
 </head>
 <body class="game-page">
 <canvas class="g-map" id="terrain" aria-hidden="true"></canvas>
@@ -64,6 +65,28 @@
 </footer>
 
 <p class="g-key"><span></span> Open order <span></span> Claimed order</p>
+<nav class="g-explore" aria-label="Explore Oslo">
+  <select id="explore-place" aria-label="Fly to an Oslo district">
+    <option value="">Explore Oslo</option>
+    <option value="10.751,59.921">City centre · AI match</option>
+    <option value="10.700,59.927">Frogner &amp; Vigeland</option>
+    <option value="10.679,59.904">Bygdøy</option>
+    <option value="10.683,59.924">Skøyen</option>
+    <option value="10.714,59.931">Majorstuen</option>
+    <option value="10.733,59.949">Ullevål</option>
+    <option value="10.770,59.938">Torshov &amp; Sagene</option>
+    <option value="10.786,59.940">Sinsen</option>
+    <option value="10.813,59.944">Bjerke</option>
+    <option value="10.802,59.917">Helsfyr</option>
+    <option value="10.792,59.906">Vålerenga</option>
+    <option value="10.774,59.890">Ekeberg forest</option>
+    <option value="10.736,59.895">Hovedøya</option>
+  </select>
+  <button type="button" id="city-overview" title="See the whole city">Full city</button>
+  <button type="button" id="city-home" title="Return to the AI match" aria-label="Return to the AI match">⌂</button>
+  <button type="button" id="zoom-out" aria-label="Zoom out">−</button>
+  <button type="button" id="zoom-in" aria-label="Zoom in">+</button>
+</nav>
 <section class="g-shop" id="shopwin" hidden aria-labelledby="shop-title">
   <header>
     <span class="g-shop-face" id="shop-face" aria-hidden="true"></span>
@@ -75,7 +98,7 @@
 </section>
 <section class="g-order" id="ordercard" hidden aria-live="polite"></section>
 <p class="g-hint" id="hint3d" hidden>Click a shop or an order · drag to move · right-drag or two fingers to tilt and turn · double-click to reset</p>
-<p class="g-credit">Map data from <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors</p>
+<p class="g-credit">© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors · <a href="https://openfreemap.org/">OpenFreeMap</a> / <a href="https://openmaptiles.org/">OpenMapTiles</a></p>
 <p class="g-message" id="message" role="status">Loading the game ...</p>
 </body>
 </html>

@@ -1,7 +1,7 @@
 // Preview build of the live /game/CODE page (prototypes/town-rush/game-view.js) with a 3D view added.
 import { MAP_LABELS } from './game-map-labels.js';
 import { COLORS, DEFAULT_LOOK, botSvg, cleanLook, truckSvg } from './looks.js';
-import { createPanels } from './panels.js?v=13';
+import { createPanels } from './panels.js?v=14';
 
 const $ = id => document.getElementById(id);
 const code = 'PREVIEW';
@@ -123,7 +123,7 @@ function resize() {
   if (!view.touched) fit();
 }
 
-function fit() {
+function fit(wholeCity = false) {
   if (!town || !view.w) return;
   const wide = view.w > 760;
   const boardHeight = 40 + 52 * game.players.length;
@@ -141,6 +141,11 @@ function fit() {
   view.scale = view.fit = Math.min(w / (x1 - x0), h / (y1 - y0));
   view.x = pad.l + (w - (x1 - x0) * view.scale) / 2 - x0 * view.scale;
   view.y = pad.t + (h - (y1 - y0) * view.scale) / 2 - y0 * view.scale;
+  if (town.coverage && wholeCity !== true) {
+    view.scale *= 2.4;
+    view.x = pad.l + w / 2 - wx(1075100) * view.scale;
+    view.y = pad.t + h / 2 - wy(5992100) * view.scale;
+  }
   view.touched = false;
 }
 
@@ -197,7 +202,7 @@ function choose(x, y) {
   if (hit.kind === 'order') panels.showOrder(hit.id);
   else panels.showShop(hit.seat);
 }
-canvas.addEventListener('dblclick', fit);
+canvas.addEventListener('dblclick', () => fit());
 
 function seekTo(tick) {
   play.head = clamp(tick, 0, latest());
@@ -534,7 +539,7 @@ const host3d = $('world3d');
 async function setMode(next) {
   if (next === '3d' && !world3d) {
     $('view-3d').setAttribute('aria-busy', 'true');
-    loading3d ||= import('./view3d.js?v=13').then(m => m.createWorld3d({
+    loading3d ||= import('./view3d.js?v=14').then(m => m.createWorld3d({
       host: host3d, overlay: ctx, view, town, game, play, wx, wy, truckAt, shopSign, labels: town.labels || MAP_LABELS,
       constants: { OPEN, CLAIMED, DELIVERED, MISSED, PARKED, TRAIL, POP_TICKS, INK },
       selected: () => panels?.selectedOrder ?? null, onTap: choose, hover: pickAt,
@@ -557,6 +562,33 @@ async function setMode(next) {
 }
 $('view-2d').addEventListener('click', () => setMode('2d'));
 $('view-3d').addEventListener('click', () => setMode('3d'));
+$('city-overview').addEventListener('click', () => {
+  if (mode === '3d' && world3d) world3d.overview();
+  else fit(true);
+  $('explore-place').value = '';
+});
+$('city-home').addEventListener('click', () => {
+  if (mode === '3d' && world3d) world3d.flyHome();
+  else fit();
+  $('explore-place').value = '';
+});
+for (const [id, factor] of [['zoom-in', .7], ['zoom-out', 1 / .7]]) {
+  $(id).addEventListener('click', () => {
+    if (mode === '3d' && world3d) world3d.zoomBy(factor);
+    else zoomAt(view.w / 2, view.h / 2, 1 / factor);
+  });
+}
+$('explore-place').addEventListener('change', event => {
+  if (!event.target.value) return;
+  const [lon, lat] = event.target.value.split(',').map(Number);
+  if (mode === '3d' && world3d) world3d.explore(lon, lat);
+  else {
+    view.scale = view.fit * 4.5;
+    view.x = (view.w - (view.w > 760 ? 300 : 0)) / 2 - wx(lon * 1e5) * view.scale;
+    view.y = view.h * .4 - wy(lat * 1e5) * view.scale;
+    view.touched = true;
+  }
+});
 addEventListener('keydown', event => {
   if (event.target.closest?.('input, textarea')) return;
   if (event.key === 'v' || event.key === 'V') setMode(mode === '3d' ? '2d' : '3d');
@@ -566,9 +598,14 @@ window.groceryView = { setMode, play, game, toWorld: (lon, lat) => [wx(lon), wy(
 async function start() {
   document.querySelector('.g-mark').innerHTML = botSvg(DEFAULT_LOOK);
   if (!code) { $('message').textContent = 'This link has no game code.'; return; }
-  town = await fetch('data/game-map.json').then(res => res.json());
+  town = await fetch('data/game-map.json?v=14').then(res => res.json());
   // per-town maps (tools/build-town-game-map.py) carry their own name and labels; Kongsberg's do not
-  if (town.name) { document.querySelector('.g-brand small').textContent = town.name; document.title = `Grocery Bot ${town.name} Map`; }
+  if (town.name) {
+    const [west, south, east, north] = town.bounds;
+    const km2 = (east - west) * (north - south) / 1e10 * 111.32 * 111.32 * Math.cos((south + north) / 2e5 * Math.PI / 180);
+    document.querySelector('.g-brand small').textContent = town.name + (town.coverage ? ` · ${Math.round(km2)} km² to explore` : '');
+    document.title = `Grocery Bot ${town.name} Map`;
+  }
   origin = [(town.bounds[0] + town.bounds[2]) / 2, (town.bounds[1] + town.bounds[3]) / 2];
   squash = Math.cos(origin[1] / 1e5 * Math.PI / 180);
   buildPaths();

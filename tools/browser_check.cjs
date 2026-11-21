@@ -16,7 +16,7 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
     ]) {
       const page = await browser.newPage({ viewport });
       const errors = [];
-      page.on('pageerror', error => errors.push(error.message));
+      page.on('pageerror', error => { errors.push(error.message); console.error(name, 'browser error:', error.message); });
       await page.goto((process.env.PREVIEW_URL || 'http://localhost:8138/') + '?view=2d', { waitUntil: 'networkidle' });
       await page.waitForFunction(() => window.groceryView?.game.players.length === 12 && window.groceryView.panels);
       await page.evaluate(() => { groceryView.play.paused = true; groceryView.play.head = 240; });
@@ -46,19 +46,31 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
       await page.screenshot({ path: `/tmp/opencode/oslo-${name}-2d.png` });
       await page.locator('#view-3d').click();
       await page.waitForFunction(() => groceryView.world3d && document.body.classList.contains('is-3d'), null, { timeout: 120000 });
-      const geometry = await page.evaluate(() => {
+      const geometry = await page.evaluate(async () => {
         const world = groceryView.world3d;
+        const { Frustum, Matrix4 } = await import('three');
+        const frustum = new Frustum().setFromProjectionMatrix(new Matrix4().multiplyMatrices(world.camera.projectionMatrix, world.camera.matrixWorldInverse));
         let vertices = 0;
         world.scene.traverse(object => {
-          if (object.isMesh && [20, 21].includes(object.renderOrder)) vertices += object.geometry.attributes.position.count;
+          if (object.isMesh && object.visible && [20, 21].includes(object.renderOrder) && frustum.intersectsObject(object)) vertices += object.geometry.attributes.position.count;
         });
         return { buildingVertices: vertices, drawCalls: world.renderer.info.render.calls };
       });
       assert(geometry.buildingVertices <= 650000, JSON.stringify(geometry));
+      const trees = await page.evaluate(() => groceryView.world3d.treeCounts);
+      assert(trees.forest > 1000 && trees.parks > 500, JSON.stringify(trees));
+      await page.selectOption('#explore-place', '10.774,59.890');
+      await page.waitForFunction(() => {
+        const [x, z] = groceryView.toWorld(1077400, 5989000);
+        return Math.hypot(groceryView.world3d.controls.target.x - x, groceryView.world3d.controls.target.z - z) < 10;
+      }, null, { timeout: 90000 });
+      await page.screenshot({ path: `/tmp/opencode/oslo-${name}-ekeberg.png`, timeout: 120000 });
+      await page.locator('#city-overview').click();
+      await page.waitForFunction(() => groceryView.world3d.camera.position.distanceTo(groceryView.world3d.controls.target) > 10000, null, { timeout: 90000 });
       await page.screenshot({ path: `/tmp/opencode/oslo-${name}-3d.png`, timeout: 120000 });
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
       assert.deepEqual(errors, []);
-      console.log(`${name}: PASS — 12 standings/shop selections, order card, 2D, 3D, no browser errors`, geometry);
+      console.log(`${name}: PASS — 12 standings/shop selections, order card, 2D, 3D, forests, district flight, overview`, geometry, trees);
       await page.close();
     }
     const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
