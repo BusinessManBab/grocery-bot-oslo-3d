@@ -1,5 +1,5 @@
 // 3D view of the game map. Same town data, borders, colours and replay frames as the 2D canvas
-// in game-view.js, on the real terrain: the map is draped over an elevation grid of Kongsberg
+// in game-view.js, on the real terrain: the map is draped over an elevation grid of Oslo
 // (data/terrain.bin) and everything stands on it. Order homes are the real OpenStreetMap
 // footprints at each customer address.
 import * as THREE from 'three';
@@ -227,6 +227,28 @@ export async function createWorld3d(opts) {
   // Buildings under a shop (often the real store) make way for the shop model, as on the 2D map.
   const PLAZA = 100;
   const nearShop = (x, z, r = PLAZA) => game.players.some(p => Math.hypot(p.shop[0] - x, p.shop[1] - z) < r);
+  // Dense Oslo has almost a million raw context-building vertices. Remove tiny wall
+  // jogs once at load, in metre-scaled coordinates; never simplify delivery homes.
+  function contextOutline(flat) {
+    const pts = [];
+    for (let i = 0; i < flat.length; i += 2) pts.push([flat[i], flat[i + 1]]);
+    const sq = Math.cos((b1 + b3) / 2 / 1e5 * Math.PI / 180);
+    let changed = true;
+    while (changed && pts.length > 4) {
+      changed = false;
+      for (let i = 0; i < pts.length; i++) {
+        const a = pts[(i + pts.length - 1) % pts.length], p = pts[i], b = pts[(i + 1) % pts.length];
+        const dx = (b[0] - a[0]) * sq, dy = b[1] - a[1], px = (p[0] - a[0]) * sq, py = p[1] - a[1];
+        const t = clamp((px * dx + py * dy) / (dx * dx + dy * dy || 1), 0, 1);
+        if (Math.hypot(px - t * dx, py - t * dy) * 1.113 <= 1.5) {
+          pts.splice(i, 1);
+          changed = true;
+          break;
+        }
+      }
+    }
+    return pts.flat();
+  }
   {
     const parts = { walls: [], roof: [] };
     for (const b of extra.buildings) {
@@ -234,7 +256,7 @@ export async function createWorld3d(opts) {
       for (let i = 1; i < b.length && !hit; i += 2) hit = nearShop(wx(b[i]), wy(b[i + 1]));
       if (hit) continue;
       const h = b[0] * M * LIFT;
-      prism(b.slice(1), h, parts);
+      prism(contextOutline(b.slice(1)), h, parts);
     }
     const mesh = new THREE.Mesh(prismGeometry(parts, false), litBoth(PALETTE.town));
     mesh.castShadow = mesh.receiveShadow = true;
@@ -831,7 +853,7 @@ export async function createWorld3d(opts) {
   }
 
   function region() {
-    let [x0, y0, x1, y1] = town.focus;
+    let [x0, y0, x1, y1] = town.bounds;
     const xs = game.players.map(p => p.shop[0]), zs = game.players.map(p => p.shop[1]);
     const mx = [wx(x0), wx(x1), ...xs], mz = [wy(y0), wy(y1), ...zs];
     return { x0: Math.min(...mx), x1: Math.max(...mx), z0: Math.min(...mz), z1: Math.max(...mz) };
@@ -848,6 +870,27 @@ export async function createWorld3d(opts) {
     const r = region(), p2 = pads(), tan = Math.tan(camera.fov * Math.PI / 360);
     const aw = Math.max(1, size.w - p2.l - p2.r), ah = Math.max(1, size.h - p2.t - p2.b);
     fitDistance = Math.max((r.z1 - r.z0) * Math.cos(TILT) / (2 * tan) * size.h / ah, (r.x1 - r.x0) / (2 * tan * camera.aspect) * size.w / aw) * 1.02;
+    // A tilted perspective board is wider at the near edge. Fit its actual projected
+    // corners rather than just its unprojected dimensions (especially on phones).
+    const fitCamera = camera.clone(), tx = (r.x0 + r.x1) / 2, tz = (r.z0 + r.z1) / 2;
+    const ty = heightAt(tx, tz);
+    const corners = [[r.x0, r.z0], [r.x1, r.z0], [r.x0, r.z1], [r.x1, r.z1]]
+      .flatMap(([x, z]) => [new THREE.Vector3(x, heightAt(x, z), z), new THREE.Vector3(x, -SLAB, z)]);
+    for (let attempt = 0; attempt < 24; attempt++) {
+      fitCamera.position.set(tx, ty + fitDistance * Math.cos(TILT), tz + fitDistance * Math.sin(TILT));
+      fitCamera.lookAt(tx, ty, tz);
+      fitCamera.updateMatrixWorld();
+      if (corners.every(corner => {
+        const p = corner.clone().project(fitCamera), x = (p.x + 1) * size.w / 2, y = (1 - p.y) * size.h / 2;
+        return x >= p2.l && x <= size.w - p2.r && y >= p2.t && y <= size.h - p2.b;
+      })) break;
+      fitDistance *= 1.06;
+    }
+    // Fixed Kongsberg fog distances wash out this larger board at phone overview zoom.
+    scene.fog.near = fitDistance * 1.5;
+    scene.fog.far = fitDistance * 3;
+    camera.far = Math.max(20000, fitDistance * 5);
+    camera.updateProjectionMatrix();
     controls.maxDistance = fitDistance * 2.4;
   }
 

@@ -1,0 +1,315 @@
+{
+  "id": "oslo",
+  "name": "Oslo",
+  "country": "Norway",
+  "map": "map.json",
+  "world": "world.json",
+  "map_id": "oslo-expanded-preview-v1",
+  "camera": {
+    "center": [10.751, 59.921],
+    "zoom": 14.0
+  },
+  "max_bounds": [
+    [10.55, 59.82],
+    [10.95, 60.02]
+  ],
+  "terrain_bounds": [10.53, 59.8, 10.97, 60.04],
+  "terrain_exaggeration": 1.2,
+  "play_area": {
+    "polygon": [
+      [10.7165, 59.9015],
+      [10.7865, 59.9015],
+      [10.7865, 59.9405],
+      [10.7165, 59.9405]
+    ]
+  },
+  "viewpoints": {
+    "bridge": {
+      "center": [10.7599, 59.9152],
+      "zoom": 17.5,
+      "bearing": -40
+    },
+    "hills": {
+      "center": [10.762, 59.912],
+      "zoom": 13.7,
+      "bearing": 150
+    }
+  },
+  "bridges": [
+    {
+      "id": "3236423",
+      "name": "Sannerbrua (Sannergata)",
+      "coordinates": [
+        [10.7548056, 59.9282489],
+        [10.7555783, 59.9282669]
+      ]
+    },
+    {
+      "id": "4826556",
+      "name": "Ankerbrua (Nordre gate)",
+      "coordinates": [
+        [10.7536889, 59.9211532],
+        [10.7542212, 59.9211343]
+      ]
+    },
+    {
+      "id": "4826650",
+      "name": "Nybrua (Storgata)",
+      "coordinates": [
+        [10.7590824, 59.9176806],
+        [10.7592988, 59.9178796]
+      ]
+    },
+    {
+      "id": "108165755",
+      "name": "Hausmanns bru",
+      "coordinates": [
+        [10.7596519, 59.9151895],
+        [10.7599031, 59.9151287],
+        [10.7600842, 59.9150812]
+      ]
+    },
+    {
+      "id": "108165773",
+      "name": "Hausmanns bru",
+      "coordinates": [
+        [10.7601767, 59.91518],
+        [10.7599969, 59.9152239],
+        [10.7597424, 59.9152861]
+      ]
+    },
+    {
+      "id": "4348102",
+      "name": "Vaterlandsbrua (Brugata)",
+      "coordinates": [
+        [10.7579589, 59.9134836],
+        [10.7582649, 59.913432]
+      ]
+    },
+    {
+      "id": "4826565",
+      "name": "Beierbrua (Marcus Thranes gate)",
+      "coordinates": [
+        [10.7575764, 59.9332514],
+        [10.7574721, 59.9332773],
+        [10.7573546, 59.9333051],
+        [10.7572252, 59.933333],
+        [10.7570434, 59.9333706]
+      ]
+    },
+    {
+      "id": "4826568",
+      "name": "Bentsebrua (Bentsebrugata)",
+      "coordinates": [
+        [10.7614383, 59.9365119],
+        [10.761372, 59.9365753],
+        [10.7611597, 59.9367776]
+      ]
+    }
+  ],
+  "incident": {
+    "id": "bridge-1",
+    "way_ids": [
+      "108165755",
+      "108165773"
+    ],
+    "road": "Hausmanns bru",
+    "label": "Hausmanns bru — accident"
+  },
+  "daylight": {
+    "dawn": "05:45",
+    "sunrise": "06:45",
+    "golden": "18:30",
+    "sunset": "20:15",
+    "dusk": "21:00",
+    "night": "21:45"
+  },
+  "rush_hours": [
+    [
+      "07:00",
+      "09:00"
+    ],
+    [
+      "15:00",
+      "17:00"
+    ]
+  ],
+  "game_map": {
+    "labels": [
+      [
+        "Akerselva",
+        10.7566,
+        59.9218,
+        0,
+        "river"
+      ],
+      [
+        "Bjørvika",
+        10.756,
+        59.905,
+        0,
+        "river"
+      ],
+      [
+        "Operaen",
+        10.7525,
+        59.9075,
+        1.5
+      ],
+      [
+        "Oslo S",
+        10.7522,
+        59.9109,
+        1.8
+      ],
+      [
+        "Karl Johans gate",
+        10.7435,
+        59.9135,
+        1.8
+      ],
+      [
+        "Grünerløkka",
+        10.759,
+        59.924,
+        1.5
+      ],
+      [
+        "Grønland",
+        10.7625,
+        59.9125,
+        2
+      ],
+      [
+        "Tøyen",
+        10.774,
+        59.916,
+        2
+      ],
+      [
+        "St. Hanshaugen",
+        10.7405,
+        59.9275,
+        2
+      ],
+      [
+        "Aker Brygge",
+        10.7275,
+        59.9105,
+        2
+      ],
+      [
+        "Youngstorget",
+        10.7489,
+        59.915,
+        3
+      ],
+      [
+        "Olaf Ryes plass",
+        10.7576,
+        59.9226,
+        3.2
+      ],
+      [
+        "Hausmanns bru",
+        10.7599,
+        59.9152,
+        3.5
+      ]
+    ],
+    "notes": "Flat map for the /game page (tools/build-town-game-map.py). Label positions placed by hand from OpenStreetMap (ODbL); check them in the preview."
+  },
+  "texts": {},
+  "build": {
+    "road_bounds": [10.716, 59.901, 10.787, 59.941],
+    "area": [
+      [10.7165, 59.9015],
+      [10.7865, 59.9015],
+      [10.7865, 59.9405],
+      [10.7165, 59.9405]
+    ],
+    "exclude_tunnels": true,
+    "exclude_highways": [
+      "motorway",
+      "motorway_link"
+    ],
+    "crossings": "auto",
+    "max_customers": 160,
+    "first_shop": {
+      "address": "Maridalsveien 10",
+      "coordinates": [10.751064, 59.9208219]
+    },
+    "limitations": [
+      "Turn-restriction relations are absent from this source snapshot.",
+      "Road tunnels and motorways are left out of the driving graph."
+    ],
+    "shops": [
+      {
+        "address": "Westye Egebergs gate 7B",
+        "coordinates": [10.7482661, 59.9228305]
+      },
+      {
+        "address": "Fagerheimgata 18",
+        "coordinates": [10.7695792, 59.9303152]
+      },
+      {
+        "address": "Schweigaards gate 10",
+        "coordinates": [10.7581479, 59.9116833]
+      },
+      {
+        "address": "Uelands gate 61D",
+        "coordinates": [10.7500147, 59.9338832]
+      },
+      {
+        "address": "Trondheimsveien 30",
+        "coordinates": [10.7676622, 59.9204208]
+      },
+      {
+        "address": "Grønnegata 14D",
+        "coordinates": [10.7308858, 59.9229107]
+      },
+      {
+        "address": "Pilestredet 28",
+        "coordinates": [10.7381541, 59.9180397]
+      },
+      {
+        "address": "Storgata 97",
+        "coordinates": [10.7554191, 59.9175846]
+      },
+      {
+        "address": "Helgesens gate 20B",
+        "coordinates": [10.7598937, 59.9247281]
+      },
+      {
+        "address": "Sandakerveien 20L",
+        "coordinates": [10.7608826, 59.9335975]
+      },
+      {
+        "address": "Nedre Vollgate 18",
+        "coordinates": [10.7390446, 59.9119816]
+      },
+      {
+        "address": "Helgesens gate 84C",
+        "coordinates": [10.7768913, 59.9220571]
+      }
+    ],
+    "map_id": "oslo-expanded-preview-v1"
+  },
+  "sources": {
+    "roads": "OpenStreetMap via Overpass (maps.mail.ru mirror; overpass-api.de was at capacity), one query, ODbL © OpenStreetMap contributors",
+    "addresses": "Kartverket address register via Geonorge punktsok (CC BY 4.0), 12 requests",
+    "routing": "OSRM public demo server, one table request, cached in osrm-matrix.json"
+  },
+  "calibration": {
+    "car_calibration": 1.35,
+    "allowance_kmh": 17,
+    "rush_speed": {
+      "easy": 1.0,
+      "medium": 0.88,
+      "hard": 0.73,
+      "expert": 0.67,
+      "nightmare": 0.62
+    }
+  },
+  "calibration_notes": "Measured by tools/calibrate-town.py: car_calibration = median OSRM/engine-at-limits over 667 pairs; fastest routes median 18.6 km/h (11.2 in rush); go-now/wait balance at rush speed 0.549 (Kongsberg 0.49) over 2100 cases → hard 0.73."
+}

@@ -1,7 +1,7 @@
 // Preview build of the live /game/CODE page (prototypes/town-rush/game-view.js) with a 3D view added.
 import { MAP_LABELS } from './game-map-labels.js';
 import { COLORS, DEFAULT_LOOK, botSvg, cleanLook, truckSvg } from './looks.js';
-import { createPanels } from './panels.js?v=12';
+import { createPanels } from './panels.js?v=13';
 
 const $ = id => document.getElementById(id);
 const code = 'PREVIEW';
@@ -55,6 +55,7 @@ function setMeta(meta) {
   const span = meta.dayEnd - meta.clockStart;
   $('day').innerHTML = meta.rushHours.map(([a, b]) => `<i style="left:${(a - meta.clockStart) / span * 100}%;width:${(b - a) / span * 100}%"></i>`).join('') + '<b id="day-fill"></b>';
   $('board').style.height = `${game.players.length * 52}px`;
+  $('board-title').textContent = `Standings · ${game.players.length} AI players`;
   $('board').replaceChildren(...game.players.map(player => {
     const row = document.createElement('button');
     row.type = 'button';
@@ -62,7 +63,7 @@ function setMeta(meta) {
     row.style.setProperty('--seat', player.colour);
     row.innerHTML = `<span class="g-rank"></span><span class="g-face">${botSvg(player.look)}</span><span class="g-who"><strong></strong><small></small></span><span class="g-score"></span>`;
     row.querySelector('strong').textContent = player.name;
-    row.addEventListener('click', () => { play.focus = play.focus === player.seat ? null : player.seat; lastBoardTick = -1; });
+    row.addEventListener('click', () => { play.focus = play.focus === player.seat ? null : player.seat; panels?.showShop(player.seat); lastBoardTick = -1; });
     player.row = row;
     return row;
   }));
@@ -91,7 +92,11 @@ async function load() {
     // shop window + order card; `meta.you` is the viewer's seat (in the live game: the signed-in player's)
     createPanels({ game, play, you: Number.isInteger(game.meta.you) ? game.meta.you : null }).then(made => { panels = made; }).catch(error => console.error(error));
     play.following = !game.finished;
-    play.head = game.finished ? 0 : Math.max(0, latest() - 1);
+    // Open on active deliveries rather than asking spectators to wait through packing.
+    // The entire recording, including the opening, remains available on the timeline.
+    const requestedTick = new URLSearchParams(location.search).get('t');
+    const openingTick = requestedTick !== null && Number.isFinite(Number(requestedTick)) ? Number(requestedTick) : 120;
+    play.head = game.finished ? clamp(openingTick, 0, latest()) : Math.max(0, latest() - 1);
     if (!game.finished) play.speed = 1;
     fit();
   }
@@ -124,7 +129,7 @@ function fit() {
   const boardHeight = 40 + 52 * game.players.length;
   const pad = { l: wide ? 44 : 30, t: 104, r: wide ? 334 : 30,
     b: wide ? 92 : Math.min(boardHeight, view.h * .34) + 101 };
-  let [x0, y0, x1, y1] = town.focus;
+  let [x0, y0, x1, y1] = town.bounds;
   if (game.players.length) {
     const xs = game.players.map(p => p.shop[0]), ys = game.players.map(p => p.shop[1]);
     const mx = [wx(x0), wx(x1), ...xs], my = [wy(y0), wy(y1), ...ys];
@@ -463,7 +468,7 @@ function hud(frame, next, k) {
   const live = !game.finished && play.following, done = game.finished && play.head >= game.meta.ticks;
   $('badge').textContent = live ? 'Live' : done ? 'Final' : game.finished ? 'Replay' : 'Behind live';
   $('badge').classList.toggle('is-live', live);
-  $('board-title').textContent = done ? 'Final result' : 'Standings';
+  $('board-title').textContent = `${done ? 'Final result' : 'Standings'} · ${game.players.length} AI players`;
   $('live').hidden = game.finished || play.following;
   $('speed').hidden = !game.finished && play.following;
   $('speed').textContent = `${play.speed}×`;
@@ -529,7 +534,7 @@ const host3d = $('world3d');
 async function setMode(next) {
   if (next === '3d' && !world3d) {
     $('view-3d').setAttribute('aria-busy', 'true');
-    loading3d ||= import('./view3d.js?v=12').then(m => m.createWorld3d({
+    loading3d ||= import('./view3d.js?v=13').then(m => m.createWorld3d({
       host: host3d, overlay: ctx, view, town, game, play, wx, wy, truckAt, shopSign, labels: town.labels || MAP_LABELS,
       constants: { OPEN, CLAIMED, DELIVERED, MISSED, PARKED, TRAIL, POP_TICKS, INK },
       selected: () => panels?.selectedOrder ?? null, onTap: choose, hover: pickAt,
@@ -569,8 +574,8 @@ async function start() {
   buildPaths();
   resize();
   requestAnimationFrame(frame);
-  load();
-  if (new URLSearchParams(location.search).get('view') === '3d') setMode('3d');
+  await load();
+  if (new URLSearchParams(location.search).get('view') !== '2d') setMode('3d');
 }
 
 start();

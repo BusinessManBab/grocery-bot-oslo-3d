@@ -1,10 +1,10 @@
-"""Play a 5-seat Town Rush match with the real engine and export what the preview needs.
+"""Play a 12-seat Oslo Town Rush match with the real engine and export the preview.
 
     python3 tools/simulate_match.py ENGINE_DIR RUSH_AI_DIR OUT_DIR [seed]
 
-ENGINE_DIR: prototypes/town-rush of a checkout (codex/town-rush-launch-fixes matches live).
-Seats: the user's rush-ai (in-process, same interface as the CLI), two ReferenceBots and two
-StarterBots. Outputs:
+ENGINE_DIR: the isolated multi-town engine prepared by tools/prepare_oslo.py.
+Seats: four rush-ai instances (in-process, same interface as the CLI) and eight ReferenceBots.
+Outputs:
   game.json   the public feed (engine.feed.from_replay, exactly what /api/games serves) + looks
   shop.json   the shop floor layout, rules, and every order's items/address/timeline
   (game.json also gets meta.you, the seat whose shop opens as "Your shop")
@@ -22,7 +22,7 @@ SEED = int(sys.argv[4]) if len(sys.argv) > 4 else 7
 sys.path.insert(0, ENGINE)
 sys.path.insert(1, RUSH)
 
-from engine.bots import ReferenceBot, StarterBot          # noqa: E402
+from engine.bots import ReferenceBot                     # noqa: E402
 from engine.feed import from_replay                        # noqa: E402
 from engine.replay import Recorder                         # noqa: E402
 from engine.simulation import create_match, match_start, observe, step   # noqa: E402
@@ -36,11 +36,17 @@ LOOKS = {
     'Plum Pusher': {'shape': 'dome', 'color': 'ink', 'eyes': 'wink', 'carriage': 'flatbed', 'head': 'slant', 'visor': 'lights', 'decal': 'plain'},
 }
 # ids sort into seat (and shop) order
-SEATS = [('p1', 'Kale Storm', ReferenceBot), ('p2', 'Oat Runner', StarterBot), ('p3', 'Rush AI', 'rush'),
-         ('p4', 'Cheddar Dash', ReferenceBot), ('p5', 'Plum Pusher', StarterBot)]
+NAMES = ['Kale Storm', 'Oat Runner', 'Rush AI', 'Cheddar Dash', 'Plum Pusher', 'Milk Rocket',
+         'Pasta Pilot', 'Yogurt Yeti', 'Turbo Turnip', 'Rye Rider', 'Berry Bolt', 'Fjord Fresh']
+COLOURS = ['plum', 'red', 'lemon', 'oat', 'ink', 'milk', 'leaf', 'carrot', 'teal', 'rose', 'indigo', 'cocoa']
+for i, name in enumerate(NAMES):
+    LOOKS[name] = {**list(LOOKS.values())[i % 5], 'color': COLOURS[i]}
+SEATS = [(f'p{i + 1:02}', name, 'rush' if i in (2, 5, 8, 11) else ReferenceBot)
+         for i, name in enumerate(NAMES)]
 ACTIONS = {'wait': 0, 'move_up': 1, 'move_down': 1, 'move_left': 1, 'move_right': 1, 'pick_up': 2, 'load': 3, 'drop_off': 3}
 
-state = create_match(seed=SEED, difficulty='medium', players=[{'id': i, 'name': n} for i, n, _ in SEATS], match_id='PREVIEW')
+state = create_match(seed=SEED, difficulty='medium', players=[{'id': i, 'name': n} for i, n, _ in SEATS],
+                     match_id='OSLO-12-AI', town='oslo')
 bots = {}
 for pid, _, kind in SEATS:
     start = match_start(state, pid)
