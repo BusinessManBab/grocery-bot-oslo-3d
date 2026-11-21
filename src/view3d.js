@@ -16,10 +16,11 @@ import { MapControls } from 'three/addons/controls/MapControls.js';
 import { SVGLoader } from 'three/addons/loaders/SVGLoader.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { COLORS, HEADS, INK as TRUCK_INK, SHELL, EDGE, WOOD, LAMP, mix, light, face } from './looks.js';
-import { BASE, createBuildings } from './buildings3d.js?v=18';
-import { forestPath } from './forest.js?v=18';
-import { streamCity } from './city-stream.js?v=18';
-import { LIFT, M, RELIEF, UV_SCALE, createDecks, createFrame, readBuildings } from './world-build.js?v=18';
+import { BASE, createBuildings } from './buildings3d.js?v=19';
+import { forestPath } from './forest.js?v=19';
+import { streamCity } from './city-stream.js?v=19';
+import { buildLandmarks, landmarkClearance, landmarkTop } from './landmarks.js?v=19';
+import { LIFT, M, RELIEF, UV_SCALE, createDecks, createFrame, readBuildings } from './world-build.js?v=19';
 
 const PALETTE = {
   ground: '#f0e9d8', side: '#e2d6bb', base: '#cfc1a2', green: '#c9d8ac', water: '#86b8c5',
@@ -48,16 +49,17 @@ export function pickQuality() {
 export async function createWorld3d(opts) {
   const { host, overlay: ctx, view, town, game, play, wx, wy, truckAt, labels } = opts;
   const grab = opts.grab || ((url, kind) => fetch(url).then(res => { if (!res.ok) throw new Error(`${url}: ${res.status}`); return res[kind](); }));
-  const forest = opts.trees?.forest || opts.forest || [];
-  const parkSpots = opts.trees?.parks || [];
+  let forest = opts.trees?.forest || opts.forest || [];
+  let parkSpots = opts.trees?.parks || [];
   const low = (opts.quality || pickQuality()) === 'low';
   let picks = [];                           // this frame's clickable shops and order houses, in screen pixels
   const { OPEN, DELIVERED, PARKED, TRAIL, POP_TICKS, INK } = opts.constants;
-  const [relief, heightBuffer, buildingBuffer, homeData] = await Promise.all([
-    grab('data/terrain.json?v=18', 'json'),
-    grab('data/terrain.bin?v=18', 'arrayBuffer'),
-    grab('data/buildings.bin?v=18', 'arrayBuffer'),
-    grab('data/homes.json?v=18', 'json'),
+  const [relief, heightBuffer, buildingBuffer, homeData, landmarkData] = await Promise.all([
+    grab('data/terrain.json?v=19', 'json'),
+    grab('data/terrain.bin?v=19', 'arrayBuffer'),
+    grab('data/buildings.bin?v=19', 'arrayBuffer'),
+    grab('data/homes.json?v=19', 'json'),
+    grab('data/landmarks.json?v=19', 'json').catch(() => null),
   ]);
   const heights = new Uint16Array(heightBuffer);
   // Setup runs in short steps with a breath in between, so the page keeps answering (the 2D map
@@ -246,11 +248,17 @@ export async function createWorld3d(opts) {
 
   // Delivery homes: the same cartoon builder, all in one mesh per material (instead of three draw
   // calls per home). An order recolours that home's walls and roof through its vertex colours.
+  // A delivery address inside a landmark (the City Hall is one) keeps its pin and ring on the
+  // landmark, but the landmark stands for its building.
   const homeOut = { walls: {}, roof: cartoon.bucket(), trim: cartoon.bucket(), plain: true };
+  const insideLandmark = landmarkData ? landmarkTop(landmarkData, wx, wy) : () => null;
   const homes = homeData.homes.map((home, i) => {
     const wallsBefore = Object.fromEntries(Object.entries(homeOut.walls).map(([k, b]) => [k, b.vertices]));
     const roofBefore = homeOut.roof.vertices;
-    const { pts, top, style } = cartoon.build(home.ring, Math.max(7, home.h), home.info || ['house'], 100000 + i, homeOut);
+    const landmarkHeight = insideLandmark(wx(home.p[0]), wy(home.p[1]));
+    let { pts, top, style } = landmarkHeight === null ? cartoon.build(home.ring, Math.max(7, home.h), home.info || ['house'], 100000 + i, homeOut)
+      : { pts: home.ring.reduce((list, v, k) => (k % 2 ? list : [...list, [wx(v), wy(home.ring[k + 1])]]), []), top: 0, style: null };
+    if (landmarkHeight !== null) top = heightAt(wx(home.p[0]), wy(home.p[1])) + landmarkHeight * M * LIFT;
     let cx = 0, cz = 0, r = 0;
     for (const p of pts) { cx += p[0]; cz += p[1]; }
     cx /= pts.length; cz /= pts.length;
@@ -269,7 +277,7 @@ export async function createWorld3d(opts) {
     pin.renderOrder = 50;
     pin.visible = false;
     scene.add(pin);
-    return { i, key: `${home.p[0]},${home.p[1]}`, style, walls: [wallsBefore[style] || 0, homeOut.walls[style].vertices],
+    return { i, key: `${home.p[0]},${home.p[1]}`, style, walls: style ? [wallsBefore[style] || 0, homeOut.walls[style].vertices] : [0, 0],
       roofs: [roofBefore, homeOut.roof.vertices], ring, pin, x: cx, z: cz, top, state: '' };
   });
   const homeColours = {};                  // part -> dynamic colour attribute
@@ -304,10 +312,22 @@ export async function createWorld3d(opts) {
       for (let v = start; v < end; v++) attribute.setXYZ(v, paintColour.r, paintColour.g, paintColour.b);
       attribute.needsUpdate = true;
     };
+    if (!home.style) return;                       // drawn by its landmark
     fill(homeColours[home.style], home.walls, wall);
     fill(homeColours.roof, home.roofs, roof);
   }
   for (const home of homes) setHomeColour(home, PALETTE.homeWall, PALETTE.home);
+
+  // Oslo's famous buildings (src/landmarks.js): the Opera House, MUNCH, the City Hall, the Royal
+  // Palace and more, from their real OSM parts or modelled on their measured footprints. The plain
+  // footprints they replace are already left out of data/buildings.bin by the bake.
+  const landmarks = landmarkData ? buildLandmarks({ data: landmarkData, heightAt, wx, wy, M, LIFT, scene, wallTint, cartoon }) : { meshes: [], stats: { sites: 0 } };
+  if (landmarkData) {
+    // the trees were planted before these buildings were in the data: none inside a landmark
+    const occupied = landmarkClearance(landmarkData, wx, wy);
+    parkSpots = parkSpots.filter(([x, z]) => !occupied(x, z));
+    forest = forest.filter(([x, z]) => !occupied(x, z));
+  }
 
   // Pins: the 2D order square (white mark), standing on a little stem, one texture per colour.
   const pinTextures = new Map();
@@ -877,7 +897,8 @@ export async function createWorld3d(opts) {
   await pass();
 
   // ---- per-player actors ---------------------------------------------------------
-  const TRUCK_SCALE = .9, SHOP_SCALE = 2.4;
+  // trucks a third smaller than before, so they keep to the streets instead of clipping the houses
+  const TRUCK_SCALE = .62, SHOP_SCALE = 2.4;
   const players = game.players.map(player => {
     const shop = buildShop(player);
     shop.group.position.set(player.shop[0], 0, player.shop[1]);
@@ -1367,6 +1388,7 @@ export async function createWorld3d(opts) {
   return { render, setActive, flyHome: () => flyTo(home()), overview, explore, zoomBy,
     buildingMode: 'all', get quality() { return quality; }, ready: cityReady, get cityDone() { return cityDone; },
     buildingStats, roadStats, homeStats: { homes: homes.length, drawCalls: homeMeshes.length },
+    landmarkStats: { ...landmarks.stats, drawCalls: landmarks.meshes.length },
     treeCounts: { parks: parkTreeCount, forest: forestTreeCount },
     camera, controls, scene, renderer, flowAt, streaks: STREAKS, bridges, get picks() { return picks; } };
 }

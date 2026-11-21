@@ -1,7 +1,7 @@
 // Build worker for the 3D city (see src/world-build.js). The page sends the terrain and the baked
 // footprints once, then asks for one chunk (or the roads) at a time and gets transferable typed
 // arrays back, so building 54k buildings never blocks scrolling, clicks or the replay.
-import { buildChunk, buildRoads, createFrame, readBuildings } from './world-build.js?v=18';
+import { buildChunk, buildRoads, createFrame, readBuildings } from './world-build.js?v=19';
 
 let frame = null, data = null;
 self.onmessage = ({ data: message }) => {

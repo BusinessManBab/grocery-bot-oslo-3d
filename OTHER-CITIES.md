@@ -22,6 +22,7 @@ yet, because there is no Oslo replay (see step 2).
 | `terrain.bin` + `terrain.json` | Elevation grid over the map bounds | `tools/build_city.py terrain` |
 | `buildings.bin` + `homes.json` | What the 3D view actually loads: the background footprints simplified, without the shop stores, chunked and binary; the delivery homes | `node tools/bake_buildings.mjs` (step 4b) |
 | `trees.bin` | The forest and park trees, planted once | `node tools/bake_trees.cjs` (step 4b) |
+| `landmarks.json` | The town's famous buildings: real OSM building parts with heights and colours, or a frame for a hand model | `tools/bake_landmarks.py` (step 4b) |
 | `shop.json` + `shop.bin` | Inside the shops: robot positions, what they carry, truck loading; every order's items, address and timeline. Optional: without them the page simply has no shop window or order card | The full engine replay of the same game (see "Shop window and order card") |
 
 Everything else (`index.html`, `src/`, `static/`, `assets/`) stays as it is.
@@ -124,6 +125,7 @@ footprints and planting the forest at every visit froze phones for tens of secon
 out of memory. Bake them once, after any change to the map, buildings, land cover or replay:
 
 ```sh
+.cache/build-venv/bin/python tools/bake_landmarks.py                # data/landmarks.json (edit SITES first)
 node tools/bake_buildings.mjs                                       # data/buildings.bin + homes.json
 PLAYWRIGHT_MODULE=/path/to/playwright node tools/bake_trees.cjs     # data/trees.bin (needs Chromium, no GPU)
 python3 tools/check_preview.py                                      # fails if either bake is stale
@@ -131,6 +133,13 @@ python3 tools/check_preview.py                                      # fails if e
 
 The 3D view then builds the buildings and roads in web workers (`src/world-worker.js`), nearest
 chunk first, straight into GPU-ready typed arrays.
+
+Landmarks: list the town's famous buildings in `SITES` in `tools/bake_landmarks.py` (POI position,
+radius, and `parts` to extrude their OSM building parts or `model` for a shape written in
+`src/landmarks.js`). Check each site's selection before trusting it: at z14 OpenMapTiles merges
+same-height buildings into one feature, so the bake splits features into single polygons, and a
+radius that is too wide picks up the neighbours. `bake_buildings.mjs` also drops footprints that
+stand mostly on the drawn water (nonzero fill rule, as the page paints it).
 
 ### 5. Bump the cache version
 

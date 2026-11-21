@@ -28,6 +28,24 @@ Playback opens at tick 120 with deliveries in motion; scrub back or use `?t=0` f
   The twelve shop buildings use their mapped footprints with player-coloured roofs,
   not oversized generic stores. There are **54,326 background buildings** plus the 398
   delivery homes. Real elevation now spans **0–377 m**, on a **711 × 668** height grid.
+- **Oslo's landmarks, true to life** (`src/landmarks.js`, data from `tools/bake_landmarks.py`).
+  The plain building data missed or flattened Oslo's famous buildings (OpenStreetMap maps them
+  as multi-part buildings, and heights were capped at 40 m). They are now built from their real
+  OSM building parts, each with its own floor and roof height and mapped colour: the City Hall's
+  brick towers with clock faces, the Royal Palace with its portico and zinc roofs, Akershus
+  Castle's roofs and copper tower caps, the cathedral with its green spire, Stortinget's domed
+  halls, the Nationaltheatret, Nasjonalmuseet with its alabaster light hall, Deichman Bjørvika,
+  the Barcode towers and the 117 m Plaza and 107 m Posthuset towers by Oslo S. Shapes OSM cannot
+  describe are modelled on each building's measured footprint: the **Opera House**'s marble roof
+  sloping into the fjord with its glass hall and stage towers, **MUNCH**'s tower bending over at
+  37 m, the **Astrup Fearnley Museum**'s glass sail roofs, the **Fram Museum**'s A-frames and the
+  **Vigeland Monolith** on its stepped plinth. Sixteen sites, about ten draw calls in all.
+- **Nothing floats on the fjord:** buildings standing mostly on the water the map draws
+  (houseboats, pier kiosks, boathouses whose decks are not drawn) are left out when baking.
+  Islands and filled-in harbours are land, so the cabins on Lindøya, Nakholmen and Bleikøya
+  and Tjuvholmen's buildings stay. One delivery address on the City Hall pier remains, because
+  it is part of the recorded match.
+- **Trucks a third smaller**, so they keep to the streets instead of clipping the houses.
 - **Cartoon buildings from the hills guide:** pitched roofs, chimneys, doors, apartment
   balconies, shop sign bands, industrial corrugation, garage doors, and a church spire.
   Styles come from OSM building types where available and a deterministic size/height
@@ -135,6 +153,7 @@ python3 tools/build_city.py terrain --step 12
 .cache/build-venv/bin/python tools/spread_shops.py
 .cache/build-venv/bin/python tools/use_real_shops.py
 python3 tools/record_city.py .cache/town-rush /path/to/rush-ai 8
+.cache/build-venv/bin/python tools/bake_landmarks.py              # data/landmarks.json
 node tools/bake_buildings.mjs                                     # data/buildings.bin + homes.json
 PLAYWRIGHT_MODULE=/path/to/playwright node tools/bake_trees.cjs   # data/trees.bin
 python3 tools/check_preview.py                                    # also fails if a bake is stale

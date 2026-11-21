@@ -8,7 +8,7 @@
 //  - indices: uint16 when the mesh has fewer than 65536 vertices, else uint32
 // That is 20 bytes per building vertex instead of 44, and indexed faces need 4 vertices per
 // wall instead of 6.
-import { Bucket, STYLES, createBuilder } from './building-geometry.js?v=18';
+import { Bucket, STYLES, createBuilder } from './building-geometry.js?v=19';
 
 export const M = 1 / 1.113;              // world units per metre (one unit is 1e-5 degree of latitude)
 export const LIFT = 1.3;                 // buildings a little taller than life so the town reads from above
