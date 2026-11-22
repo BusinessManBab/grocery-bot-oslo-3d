@@ -16,11 +16,11 @@ import { MapControls } from 'three/addons/controls/MapControls.js';
 import { SVGLoader } from 'three/addons/loaders/SVGLoader.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { COLORS, HEADS, INK as TRUCK_INK, SHELL, EDGE, WOOD, LAMP, mix, light, face } from './looks.js';
-import { BASE, createBuildings } from './buildings3d.js?v=19';
-import { forestPath } from './forest.js?v=19';
-import { streamCity } from './city-stream.js?v=19';
-import { buildLandmarks, landmarkClearance, landmarkTop } from './landmarks.js?v=19';
-import { LIFT, M, RELIEF, UV_SCALE, createDecks, createFrame, readBuildings } from './world-build.js?v=19';
+import { BASE, createBuildings } from './buildings3d.js?v=20';
+import { forestPath } from './forest.js?v=20';
+import { streamCity } from './city-stream.js?v=20';
+import { buildLandmarks, landmarkTop } from './landmarks.js?v=20';
+import { LIFT, M, RELIEF, UV_SCALE, createDecks, createFrame, readBuildings } from './world-build.js?v=20';
 
 const PALETTE = {
   ground: '#f0e9d8', side: '#e2d6bb', base: '#cfc1a2', green: '#c9d8ac', water: '#86b8c5',
@@ -49,17 +49,17 @@ export function pickQuality() {
 export async function createWorld3d(opts) {
   const { host, overlay: ctx, view, town, game, play, wx, wy, truckAt, labels } = opts;
   const grab = opts.grab || ((url, kind) => fetch(url).then(res => { if (!res.ok) throw new Error(`${url}: ${res.status}`); return res[kind](); }));
-  let forest = opts.trees?.forest || opts.forest || [];
-  let parkSpots = opts.trees?.parks || [];
+  const forest = opts.trees?.forest || opts.forest || [];
+  const parkSpots = opts.trees?.parks || [];     // both cleared of houses and landmarks by tools/tree_clearance.mjs
   const low = (opts.quality || pickQuality()) === 'low';
   let picks = [];                           // this frame's clickable shops and order houses, in screen pixels
   const { OPEN, DELIVERED, PARKED, TRAIL, POP_TICKS, INK } = opts.constants;
   const [relief, heightBuffer, buildingBuffer, homeData, landmarkData] = await Promise.all([
-    grab('data/terrain.json?v=19', 'json'),
-    grab('data/terrain.bin?v=19', 'arrayBuffer'),
-    grab('data/buildings.bin?v=19', 'arrayBuffer'),
-    grab('data/homes.json?v=19', 'json'),
-    grab('data/landmarks.json?v=19', 'json').catch(() => null),
+    grab('data/terrain.json?v=20', 'json'),
+    grab('data/terrain.bin?v=20', 'arrayBuffer'),
+    grab('data/buildings.bin?v=20', 'arrayBuffer'),
+    grab('data/homes.json?v=20', 'json'),
+    grab('data/landmarks.json?v=20', 'json').catch(() => null),
   ]);
   const heights = new Uint16Array(heightBuffer);
   // Setup runs in short steps with a breath in between, so the page keeps answering (the 2D map
@@ -255,9 +255,11 @@ export async function createWorld3d(opts) {
   const homes = homeData.homes.map((home, i) => {
     const wallsBefore = Object.fromEntries(Object.entries(homeOut.walls).map(([k, b]) => [k, b.vertices]));
     const roofBefore = homeOut.roof.vertices;
-    const landmarkHeight = insideLandmark(wx(home.p[0]), wy(home.p[1]));
+    const footprint = [];
+    for (let k = 0; k < home.ring.length; k += 2) footprint.push([wx(home.ring[k]), wy(home.ring[k + 1])]);
+    const landmarkHeight = insideLandmark(footprint);
     let { pts, top, style } = landmarkHeight === null ? cartoon.build(home.ring, Math.max(7, home.h), home.info || ['house'], 100000 + i, homeOut)
-      : { pts: home.ring.reduce((list, v, k) => (k % 2 ? list : [...list, [wx(v), wy(home.ring[k + 1])]]), []), top: 0, style: null };
+      : { pts: footprint, top: 0, style: null };
     if (landmarkHeight !== null) top = heightAt(wx(home.p[0]), wy(home.p[1])) + landmarkHeight * M * LIFT;
     let cx = 0, cz = 0, r = 0;
     for (const p of pts) { cx += p[0]; cz += p[1]; }
@@ -322,12 +324,6 @@ export async function createWorld3d(opts) {
   // Palace and more, from their real OSM parts or modelled on their measured footprints. The plain
   // footprints they replace are already left out of data/buildings.bin by the bake.
   const landmarks = landmarkData ? buildLandmarks({ data: landmarkData, heightAt, wx, wy, M, LIFT, scene, wallTint, cartoon }) : { meshes: [], stats: { sites: 0 } };
-  if (landmarkData) {
-    // the trees were planted before these buildings were in the data: none inside a landmark
-    const occupied = landmarkClearance(landmarkData, wx, wy);
-    parkSpots = parkSpots.filter(([x, z]) => !occupied(x, z));
-    forest = forest.filter(([x, z]) => !occupied(x, z));
-  }
 
   // Pins: the 2D order square (white mark), standing on a little stem, one texture per colour.
   const pinTextures = new Map();

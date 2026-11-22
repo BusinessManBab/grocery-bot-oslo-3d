@@ -1,8 +1,8 @@
 // Preview build of the live /game/CODE page (prototypes/town-rush/game-view.js) with a 3D view added.
 import { MAP_LABELS } from './game-map-labels.js';
-import { forestPath, unpackTrees } from './forest.js?v=19';
+import { forestPath, unpackTrees } from './forest.js?v=20';
 import { COLORS, DEFAULT_LOOK, botSvg, cleanLook, truckSvg } from './looks.js';
-import { createPanels } from './panels.js?v=19';
+import { createPanels } from './panels.js?v=20';
 
 const $ = id => document.getElementById(id);
 const code = 'PREVIEW';
@@ -15,14 +15,14 @@ function grab(url, kind) {
   if (!early.has(url)) early.set(url, fetch(url).then(res => { if (!res.ok) throw new Error(`${url}: ${res.status}`); return res[kind](); }));
   return early.get(url);
 }
-const firstGame = fetch('data/game.json?v=19').catch(() => null);
-grab('data/game-map.json?v=19', 'json');
-grab('data/trees.bin?v=19', 'arrayBuffer').catch(() => null);
+const firstGame = fetch('data/game.json?v=20').catch(() => null);
+grab('data/game-map.json?v=20', 'json');
+grab('data/trees.bin?v=20', 'arrayBuffer').catch(() => null);
 let view3dModule = null;
 if (wants3d) {
-  view3dModule = import('./view3d.js?v=19');
-  for (const [url, kind] of [['data/terrain.json?v=19', 'json'], ['data/terrain.bin?v=19', 'arrayBuffer'],
-    ['data/buildings.bin?v=19', 'arrayBuffer'], ['data/homes.json?v=19', 'json'], ['data/landmarks.json?v=19', 'json']]) grab(url, kind).catch(() => null);
+  view3dModule = import('./view3d.js?v=20');
+  for (const [url, kind] of [['data/terrain.json?v=20', 'json'], ['data/terrain.bin?v=20', 'arrayBuffer'],
+    ['data/buildings.bin?v=20', 'arrayBuffer'], ['data/homes.json?v=20', 'json'], ['data/landmarks.json?v=20', 'json']]) grab(url, kind).catch(() => null);
 }
 const canvas = $('map'), ctx = canvas.getContext('2d');
 const terrain = $('terrain'), mapCtx = terrain.getContext('2d', { alpha: false });
@@ -98,7 +98,7 @@ function addFrames(frames) {
 
 let gameRequests = 0;
 async function load() {
-  const res = await (gameRequests++ ? fetch('data/game.json?v=19').catch(() => null) : firstGame);
+  const res = await (gameRequests++ ? fetch('data/game.json?v=20').catch(() => null) : firstGame);
   const body = res && res.ok ? await res.json().catch(() => null) : null;
   if (!body) {
     if (!game.meta) $('message').textContent = res && res.status === 404 ? 'This game has not started yet. It opens here the moment it starts.' : 'Could not reach the game. Trying again ...';
@@ -562,7 +562,7 @@ async function setMode(next) {
     $('message').hidden = false;
     $('message').textContent = 'Preparing Oslo…';
     await forestReady;
-    loading3d ||= (view3dModule || import('./view3d.js?v=19')).then(m => m.createWorld3d({
+    loading3d ||= (view3dModule || import('./view3d.js?v=20')).then(m => m.createWorld3d({
       host: host3d, overlay: ctx, view, town, game, play, wx, wy, truckAt, shopSign, labels: town.labels || MAP_LABELS, trees, grab, paths,
       constants: { OPEN, CLAIMED, DELIVERED, MISSED, PARKED, TRAIL, POP_TICKS, INK },
       selected: () => panels?.selectedOrder ?? null, onTap: choose, hover: pickAt,
@@ -631,7 +631,7 @@ window.groceryView = { setMode, play, game, toWorld: (lon, lat) => [wx(lon), wy(
 let trees = { forest: [], parks: [] }, forestReady = null;
 function growForest() {
   if (params.get('forest') === '0') return;
-  forestReady = grab('data/trees.bin?v=19', 'arrayBuffer').then(buffer => {
+  forestReady = grab('data/trees.bin?v=20', 'arrayBuffer').then(buffer => {
     trees = unpackTrees(buffer);
     paths.forest = forestPath(trees.forest);
     mapKey = '';
@@ -655,7 +655,7 @@ async function start() {
   document.querySelector('.g-mark').innerHTML = botSvg(DEFAULT_LOOK);
   $('building-mode-label').textContent = 'Every building resident once built';
   if (!code) { $('message').textContent = 'This link has no game code.'; return; }
-  town = await grab('data/game-map.json?v=19', 'json');
+  town = await grab('data/game-map.json?v=20', 'json');
   // per-town maps (tools/build-town-game-map.py) carry their own name and labels; Kongsberg's do not
   if (town.name) {
     const [west, south, east, north] = town.bounds;

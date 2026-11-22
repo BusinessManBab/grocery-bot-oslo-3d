@@ -30,16 +30,21 @@ Playback opens at tick 120 with deliveries in motion; scrub back or use `?t=0` f
   delivery homes. Real elevation now spans **0–377 m**, on a **711 × 668** height grid.
 - **Oslo's landmarks, true to life** (`src/landmarks.js`, data from `tools/bake_landmarks.py`).
   The plain building data missed or flattened Oslo's famous buildings (OpenStreetMap maps them
-  as multi-part buildings, and heights were capped at 40 m). They are now built from their real
-  OSM building parts, each with its own floor and roof height and mapped colour: the City Hall's
-  brick towers with clock faces, the Royal Palace with its portico and zinc roofs, Akershus
-  Castle's roofs and copper tower caps, the cathedral with its green spire, Stortinget's domed
-  halls, the Nationaltheatret, Nasjonalmuseet with its alabaster light hall, Deichman Bjørvika,
-  the Barcode towers and the 117 m Plaza and 107 m Posthuset towers by Oslo S. Shapes OSM cannot
-  describe are modelled on each building's measured footprint: the **Opera House**'s marble roof
-  sloping into the fjord with its glass hall and stage towers, **MUNCH**'s tower bending over at
-  37 m, the **Astrup Fearnley Museum**'s glass sail roofs, the **Fram Museum**'s A-frames and the
-  **Vigeland Monolith** on its stepped plinth. Sixteen sites, about ten draw calls in all.
+  as multi-part buildings, and heights were capped at 40 m). The most famous ones are shaped
+  from photos and the orthophoto and lightly detailed:
+  the **Opera House** (flat marble plaza at the water, the ramp rising from the fjord, the north
+  wing over its long glass facade, the glazed foyer under a knife-thin roof edge, white stage
+  towers, the aluminium workshops), the **City Hall** (brown brick towers, east 66 m with the
+  clock, west 63 m with the mast), the **Royal Palace** (cream walls, zinc roofs, the portico
+  facing Karl Johans gate), **Akershus Castle** (pale plaster on the rock, red-brown tile roofs,
+  two copper spires), **MUNCH** (bending over at 37 m) and the **Vigeland Monolith**. The other
+  well-known buildings get their correct shape from their OSM parts, heights and colours,
+  without extra detail: Stortinget, the cathedral, Nationaltheatret, Nasjonalmuseet (light hall
+  on top), Deichman, Barcode, the Plaza and Posthuset towers, Astrup Fearnley, the Fram Museum.
+  A delivery address inside a landmark (the Opera and the City Hall are addresses in the match)
+  is drawn by the landmark, with its order pin above the roof.
+- **No trees inside houses:** every tree whose crown would stand in or against a building,
+  delivery home or landmark is removed when baking (`tools/tree_clearance.mjs`).
 - **Nothing floats on the fjord:** buildings standing mostly on the water the map draws
   (houseboats, pier kiosks, boathouses whose decks are not drawn) are left out when baking.
   Islands and filled-in harbours are land, so the cabins on Lindøya, Nakholmen and Bleikøya
@@ -155,7 +160,8 @@ python3 tools/build_city.py terrain --step 12
 python3 tools/record_city.py .cache/town-rush /path/to/rush-ai 8
 .cache/build-venv/bin/python tools/bake_landmarks.py              # data/landmarks.json
 node tools/bake_buildings.mjs                                     # data/buildings.bin + homes.json
-PLAYWRIGHT_MODULE=/path/to/playwright node tools/bake_trees.cjs   # data/trees.bin
+PLAYWRIGHT_MODULE=/path/to/playwright node tools/bake_trees.cjs   # data/trees.bin (then cleared of buildings)
+node tools/tree_clearance.mjs                                     # re-clear trees after changing buildings/landmarks
 python3 tools/check_preview.py                                    # also fails if a bake is stale
 ```
 

@@ -128,6 +128,7 @@ out of memory. Bake them once, after any change to the map, buildings, land cove
 .cache/build-venv/bin/python tools/bake_landmarks.py                # data/landmarks.json (edit SITES first)
 node tools/bake_buildings.mjs                                       # data/buildings.bin + homes.json
 PLAYWRIGHT_MODULE=/path/to/playwright node tools/bake_trees.cjs     # data/trees.bin (needs Chromium, no GPU)
+node tools/tree_clearance.mjs                                       # trees out of houses/landmarks (no browser)
 python3 tools/check_preview.py                                      # fails if either bake is stale
 ```
 

@@ -65,7 +65,7 @@ bin_header = baked("buildings.bin", ["buildings.json", "game-map.json", "game.js
 assert bin_header["count"] > 54000 and sum(c[1] for c in bin_header["chunks"]) == bin_header["count"]
 assert bin_header["bounds"] == town["bounds"]
 assert load("homes.json")["homes"] == buildings["homes"]
-tree_header = baked("trees.bin", ["game-map.json", "buildings.json", "landcover.json", "game.json"])
+tree_header = baked("trees.bin", ["game-map.json", "buildings.json", "landcover.json", "game.json", "homes.json", "landmarks.json"])
 assert tree_header["forest"] > 1000 and tree_header["parks"] > 500, tree_header
 print(f"PASS: 12 real grocery-store locations, 60 trucks, 398 matching homes, {shop['ticks']} synchronized frames.")
 print(f"Shop separations: {min(separations):.0f}–{max(separations):.0f} m")

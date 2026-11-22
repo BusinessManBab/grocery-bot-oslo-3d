@@ -5,7 +5,7 @@
 //    (no geometry per window); the wall colour comes from vertex colours, and wall materials
 //    multiply by 1 / BASE so plain wall shows the true colour
 import * as THREE from 'three';
-import { BASE, Bucket, createBuilder, ringPoints } from './building-geometry.js?v=19';
+import { BASE, Bucket, createBuilder, ringPoints } from './building-geometry.js?v=20';
 
 export { BASE };
 
