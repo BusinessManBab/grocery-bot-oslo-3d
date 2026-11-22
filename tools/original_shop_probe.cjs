@@ -1,4 +1,4 @@
-// GPU-only probe: original Grocery Bot 2D shop, not a reskinned host mall.
+// GPU-only probe: original v2 town shop, with each player's colour.
 const assert = require('node:assert/strict');
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 (async () => {
@@ -12,26 +12,31 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
     await page.goto(process.argv[2] || 'http://localhost:8138/?view=3d');
     await page.waitForFunction(() => window.groceryView?.world3d?.cityDone && groceryView.panels, null, { timeout: 180000 });
     const shops = await page.evaluate(() => groceryView.world3d.scene.children
-      .filter(o => o.userData.shopStyle === 'original-2d')
+      .filter(o => o.userData.shopStyle === 'v2-town')
       .map(group => {
         const colours = [], dimensions = [];
         group.traverse(o => {
           if (!o.isMesh) return;
-          if (o.material.color) colours.push(o.material.color.getHexString());
+          for (const material of Array.isArray(o.material) ? o.material : [o.material])
+            if (material.color) colours.push(material.color.getHexString());
           const p = o.geometry.parameters;
           if (p?.width) dimensions.push([p.width, p.height, p.depth]);
         });
-        return { scale: group.scale.toArray(), colours, dimensions };
+        return { scale: group.scale.toArray(), colours, dimensions, colour: group.userData.shopColour };
       }));
     assert.equal(shops.length, 12);
     for (const shop of shops) {
       assert.deepEqual(shop.scale, [1, 1, 1]);
-      assert(shop.colours.includes('c8102e'));
-      assert(shop.colours.includes('9ccbd0'));
-      assert(shop.colours.includes('fffaf5'));
+      assert(shop.colours.includes(shop.colour.replace('#', '').toLowerCase()), 'Shop must use its player colour');
+      assert(shop.colours.includes('b6d4d7'));
+      assert(shop.colours.includes('fff3da'));
       assert(Math.max(...shop.dimensions.map(d => d[1])) < 12, 'No mall-height shop walls');
     }
     assert.deepEqual(errors, []);
-    console.log('PASS: all 12 original red 2D-style shops, compact geometry, no browser errors');
+    assert.equal(new Set(shops.map(shop => shop.colour)).size, 12);
+    assert.deepEqual(await page.evaluate(() => groceryView.world3d.landmarkStats.palace), {
+      mainHeight: 19, roofWings: 3, columns: 8, continuousPortico: true,
+    });
+    console.log('PASS: all 12 v2 town shops, matching player colours, compact geometry, no browser errors');
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

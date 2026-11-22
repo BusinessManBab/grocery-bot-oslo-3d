@@ -332,6 +332,58 @@ export function buildLandmarks({ data, heightAt, wx, wy, M, LIFT, scene, wallTin
     const parts = site.parts || [];
     const base = baseOf(parts.flatMap(p => ringPts(p.rings[0])));
     const tallest = parts.reduce((m, p) => (p.max > (m?.max ?? -1) ? p : m), null);
+    if (site.id === 'slottet') {
+      // The raised OSM parts are eight individual portico columns, not storeys.
+      // Restore the continuous three-storey palace and keep the colonnade open.
+      const body = parts.find(p => p.min === 0);
+      const columns = parts.filter(p => p.min > 0);
+      const outline = body.rings[0], trimmed = [];
+      for (let i = 0; i < outline.length; i += 2) {
+        // The source ground footprint includes the portico's projecting platform.
+        if ((outline[i] === 1072797 && outline[i + 1] === 5991711) ||
+            (outline[i] === 1072774 && outline[i + 1] === 5991692)) continue;
+        trimmed.push(outline[i], outline[i + 1]);
+      }
+      roofed({ ...body, rings: [trimmed], max: 19, roof: { shape: 'flat' } }, base, 0, 'classic', '#ecdfb6', '#7d8790');
+      // Three low zinc roofs follow the two wings and the connected central range.
+      const wings = [
+        [1072730,5991666,1072627,5991695,1072641,5991707,1072744,5991678],
+        [1072820,5991744,1072717,5991773,1072704,5991762,1072807,5991733],
+        [1072730,5991666,1072820,5991744,1072794,5991767,1072704,5991689],
+      ];
+      for (const ring of wings) roof('hipped', ringPts(ring), base + 19.05 * K, 2.8 * K, '#7d8790');
+      const centres = columns.map(p => centre(ringPts(p.rings[0])));
+      if (centres.length >= 2) {
+        let a = centres[0], b = centres[1], length = 0;
+        // Use the real column row's direction, not a bbox of concatenated polygons.
+        for (const p of centres) for (const q of centres) {
+          const d = Math.hypot(q[0] - p[0], q[1] - p[1]);
+          if (d > length) { a = p; b = q; length = d; }
+        }
+        const ax = (b[0] - a[0]) / length, az = (b[1] - a[1]) / length;
+        const nx = -az, nz = ax;
+        const ss = centres.map(p => p[0] * ax + p[1] * az), ts = centres.map(p => p[0] * nx + p[1] * nz);
+        const s0 = Math.min(...ss) - 1.4 * M, s1 = Math.max(...ss) + 1.4 * M;
+        const t0 = Math.min(...ts) - 1.4 * M, t1 = Math.max(...ts) + 1.4 * M;
+        const P = (s, t) => [s * ax + t * nx, s * az + t * nz];
+        const A = P(s0, t0), B = P(s1, t0), C = P(s1, t1), D = P(s0, t1);
+        prism('alabaster', [[A, B, C, D]], base, 0, .8, '#e5d9bb', '#eee5cf');
+        for (const [x, z] of centres) {
+          cone(x, z, base + .8 * K, base + 16 * K, .7 * M, .6 * M, '#f7f1de', 12);
+          cone(x, z, base + 15.6 * K, base + 16.1 * K, .9 * M, .9 * M, '#f7f1de', 8);
+        }
+        prism('alabaster', [[A, B, C, D]], base, 16, 17.2, '#f7f1de', '#7d8790');
+        const lo = base + 17.2 * K, peak = base + 20 * K, mid = (s0 + s1) / 2;
+        const R0 = P(mid, t0), R1 = P(mid, t1);
+        for (const [p, q, r] of [[A, B, R0], [D, C, R1]])
+          tri(plain, [[p[0], lo, p[1]], [q[0], lo, q[1]], [r[0], peak, r[1]]], linear('#f3ecd6'));
+        quad(plain, [[A[0], lo, A[1]], [D[0], lo, D[1]], [R1[0], peak, R1[1]], [R0[0], peak, R0[1]]], linear('#7d8790'));
+        quad(plain, [[B[0], lo, B[1]], [C[0], lo, C[1]], [R1[0], peak, R1[1]], [R0[0], peak, R0[1]]], linear('#7d8790'));
+      }
+      stats.parts += 1 + columns.length;
+      stats.palace = { mainHeight: 19, roofWings: wings.length, columns: columns.length, continuousPortico: true };
+      continue;
+    }
     parts.forEach((p, i) => {
       const mat = MATERIAL[p.material];
       let kind = mat?.[0] || site.facade || 'glass';
@@ -367,31 +419,6 @@ export function buildLandmarks({ data, heightAt, wx, wy, M, LIFT, scene, wallTin
       stats.parts++;
     });
     // details only on the most famous buildings
-    if (site.id === 'slottet') {
-      // low hipped zinc roofs on the upper floors, and the columned portico facing Karl Johans gate
-      for (const p of parts.filter(q => q.min > 0)) { const pts = ringPts(p.rings[0]); roof('hipped', pts, base + (p.max + .05) * K, (axes(pts).t1 - axes(pts).t0) * .16, '#7d8790'); }
-      // the portico stands at the middle of the palace's east front (all its parts together)
-      const upper = parts.filter(q => q.min > 0), all = upper.flatMap(q => ringPts(q.rings[0]));
-      if (upper.length) {
-        const { s0, s1, t0, t1, at } = axes(all.length > 2 ? all : ringPts(upper[0].rings[0]));
-        const floor = Math.min(...upper.map(q => q.min)), roofTop = Math.max(...upper.map(q => q.max));
-        const ends = [{ a: at(s0, t0), b: at(s1, t0) }, { a: at(s1, t1), b: at(s0, t1) }, { a: at(s1, t0), b: at(s1, t1) }, { a: at(s0, t1), b: at(s0, t0) }];
-        const front = ends.reduce((m, e) => ((e.a[0] + e.b[0]) / 2 > (m.a[0] + m.b[0]) / 2 ? e : m));      // the easternmost side
-        const len = Math.hypot(front.b[0] - front.a[0], front.b[1] - front.a[1]), ax = (front.b[0] - front.a[0]) / len, az = (front.b[1] - front.a[1]) / len;
-        const ox = az, oz = -ax;                                            // outward, to the right of a -> b
-        const mid = [(front.a[0] + front.b[0]) / 2, (front.a[1] + front.b[1]) / 2], depth = 6 * M;
-        // the facade may sit inside the bounding side: step out to the nearest wall along the outward normal
-        const P = (s, out) => [mid[0] + ax * s + ox * out, mid[1] + az * s + oz * out];
-        const y0 = base + floor * K, y1 = base + (roofTop - 2) * K;
-        for (let c = -2.5; c <= 2.5; c++) { const [cx, cz] = P(c * 3.2 * M, depth - .8 * M); cone(cx, cz, y0, y1, .75 * M, .65 * M, '#f7f1de', 10); }
-        const A = P(-9.5 * M, 0), B = P(9.5 * M, 0), C = P(9.5 * M, depth), D = P(-9.5 * M, depth);
-        prism('classic', [[A, B, C, D]], base, roofTop - 2, roofTop - .6, '#f7f1de');
-        const peak = base + (roofTop + 2.2) * K, ridgeA = P(0, 0), ridgeB = P(0, depth), lo = base + (roofTop - .6) * K;
-        tri(plain, [[C[0], lo, C[1]], [D[0], lo, D[1]], [ridgeB[0], peak, ridgeB[1]]], linear('#f3ecd6'));
-        quad(plain, [[D[0], lo, D[1]], [A[0], lo, A[1]], [ridgeA[0], peak, ridgeA[1]], [ridgeB[0], peak, ridgeB[1]]], linear('#7d8790'));
-        quad(plain, [[B[0], lo, B[1]], [C[0], lo, C[1]], [ridgeB[0], peak, ridgeB[1]], [ridgeA[0], peak, ridgeA[1]]], linear('#7d8790'));
-      }
-    }
     if (site.id === 'radhus') {
       // the clock on the east tower (harbour and courtyard faces), the mast on the west tower
       const towers = parts.filter(q => q.min === 0 && q.max >= 55).sort((a, b) => centre(ringPts(a.rings[0]))[0] - centre(ringPts(b.rings[0]))[0]);
@@ -443,7 +470,7 @@ export function landmarkTop(data, wx, wy) {
   const shapes = [];
   const add = (flat, max) => { const pts = []; for (let i = 0; i < flat.length; i += 2) pts.push([wx(flat[i]), wy(flat[i + 1])]); if (pts.length >= 3) shapes.push({ pts, max }); };
   for (const site of data?.sites || []) {
-    if (site.build === 'parts') for (const p of site.parts || []) add(p.rings[0], p.max);
+    if (site.build === 'parts') for (const p of site.parts || []) add(p.rings[0], site.id === 'slottet' ? 22 : p.max);
     else for (const o of site.outline || []) add(o, MODEL_TOP[site.id] ?? 20);
   }
   const inside = (x, z, pts) => {

@@ -19,7 +19,7 @@ import { COLORS, HEADS, INK as TRUCK_INK, SHELL, EDGE, WOOD, LAMP, mix, light, f
 import { BASE, createBuildings } from './buildings3d.js?v=21';
 import { forestPath } from './forest.js?v=21';
 import { streamCity } from './city-stream.js?v=21';
-import { buildLandmarks, landmarkTop } from './landmarks.js?v=22';
+import { buildLandmarks, landmarkTop } from './landmarks.js?v=24';
 import { LIFT, M, RELIEF, UV_SCALE, createDecks, createFrame, readBuildings } from './world-build.js?v=21';
 
 const PALETTE = {
@@ -57,7 +57,7 @@ export async function createWorld3d(opts) {
   const [relief, heightBuffer, buildingBuffer, homeData, landmarkData] = await Promise.all([
     grab('data/terrain.json?v=21', 'json'),
     grab('data/terrain.bin?v=21', 'arrayBuffer'),
-    grab('data/buildings.bin?v=21', 'arrayBuffer'),
+    grab('data/buildings.bin?v=24', 'arrayBuffer'),
     grab('data/homes.json?v=21', 'json'),
     grab('data/landmarks.json?v=21', 'json').catch(() => null),
   ]);
@@ -706,24 +706,33 @@ export async function createWorld3d(opts) {
 
   function buildShop(player) {
     const store = game.meta.players[player.seat].store;
-    // Original shopSVG(), grocery-bot/prototypes/town-rush/game-actors.js:
-    // red walls, pale inset flat roof, white fascia, blue windows and dark door.
-    // Never stretch this little shop to the height or outline of its host mall.
-    const mats = { frame: lit('#e3dcd5'), wall: lit('#c8102e'), side: lit('#a20c28'),
-      fascia: lit('#fffaf5'), glass: lit('#9ccbd0'), door: lit('#3d3532'),
-      sign: new THREE.MeshLambertMaterial({ map: signTexture }), roof: lit('#f8f5ef') };
+    // Same model as grocery-bot-grimstad-3d/src/view3d.js, at a compact fixed size.
+    const mats = { frame: lit('#583a2d'), wall: lit('#fff3da'), paint: lit(player.colour),
+      glass: lit('#b6d4d7'), door: lit('#65493a'),
+      sign: new THREE.MeshLambertMaterial({ map: signTexture }), post: lit('#583a2d') };
     const g = new THREE.Group();
-    const w = 18 * M, d = 12 * M, h = 6.5 * M * LIFT, front = d / 2;
-    g.add(box(w, h + 2 * M, d, mats.wall, 0, h / 2 - M, 0));
-    g.add(box(.08 * M, h, d, mats.side, -w / 2 - .02 * M, h / 2, 0));
-    g.add(box(w + .8 * M, .45 * M, d + .8 * M, mats.frame, 0, h + .225 * M, 0));
-    g.add(box(w - 1.4 * M, .12 * M, d - 1.4 * M, mats.roof, 0, h + .51 * M, 0));
-    g.add(box(w + .1 * M, .55 * M, .18 * M, mats.fascia, 0, h - .6 * M, front + .08 * M));
-    g.add(box(w * .29, h * .42, .15 * M, mats.glass, w * .24, h * .52, front + .08 * M));
-    g.add(box(w * .23, h * .74, .18 * M, mats.door, -w * .18, h * .37, front + .09 * M));
-    g.add(box(.15 * M, h * .42, d * .62, mats.glass, -w / 2 - .09 * M, h * .52, 0));
-    const sign = box(8 * M, 8 * M / 3, .2 * M, mats.sign, 0, h + 1.9 * M, 0);
+    const u = 18 * M / 62, w = 62 * u, h = 34 * u, d = 34 * u, front = d / 2;
+    g.add(box(w, 1.6 * u, d + 2 * u, mats.frame, 0, .8 * u, 0));
+    g.add(box(w - .4 * u, 30 * u, d + 1.6 * u, mats.frame, 0, -15 * u, 0));
+    g.add(box(w - 3 * u, h, d - 3 * u, mats.wall, 0, h / 2, 0));
+    for (const sx of [-1, 1]) for (const sz of [-1, 1])
+      g.add(box(2.4 * u, h, 2.4 * u, mats.frame, sx * (w / 2 - 1.2 * u), h / 2, sz * (d / 2 - 1.2 * u)));
+    g.add(box(w + u, 6 * u, d + u, mats.paint, 0, h + 3 * u, 0));
+    g.add(box(w + u, 1.2 * u, d + u, mats.frame, 0, h + 6.6 * u, 0));
+    g.add(box(w - 6 * u, .8 * u, d - 6 * u, mats.frame, 0, h + 6.4 * u, 0));
+    for (let i = 0; i < 8; i++) {
+      const tile = box(w / 8 + .05 * u, .9 * u, 7 * u, i % 2 ? mats.wall : mats.paint, -w / 2 + w / 16 + i * w / 8, h - 1.4 * u, front + 3 * u);
+      tile.rotation.x = .5;
+      g.add(tile);
+    }
+    g.add(box(w * .34, h * .42, .8 * u, mats.glass, -w * .2, h * .4, front - u));
+    g.add(box(w * .2, h * .62, .8 * u, mats.door, w * .22, h * .31 + 1.6 * u, front - u));
+    const sign = new THREE.Mesh(new THREE.BoxGeometry(46 * u, 15.3 * u, 1.4 * u),
+      [mats.paint, mats.paint, mats.paint, mats.paint, mats.sign, mats.sign]);
+    sign.position.set(0, h + 16 * u, front - 6 * u);
+    sign.castShadow = true;
     g.add(sign);
+    for (const sx of [-1, 1]) g.add(box(1.6 * u, 9 * u, 1.6 * u, mats.post, sx * 14 * u, h + 9 * u, front - 6 * u));
     const ring = store?.footprint?.ring;
     let x = player.shop[0], z = player.shop[1];
     if (ring?.length) {
@@ -736,11 +745,12 @@ export async function createWorld3d(opts) {
     g.position.set(offset[0], 0, offset[1]);
     const wrapper = new THREE.Group();
     wrapper.add(g);
-    wrapper.userData.shopStyle = 'original-2d';
+    wrapper.userData.shopStyle = 'v2-town';
+    wrapper.userData.shopColour = player.colour;
     wrapper.userData.shopSeat = player.seat;
     wrapper.userData.shopAt = [x, z];
     wrapper.traverse(o => { if (o.isMesh) o.renderOrder = 30; });
-    return { group: wrapper, mats: Object.values(mats), actual: true, offset, top: h + 3.3 * M, radius: Math.hypot(w, d) / 2 };
+    return { group: wrapper, mats: Object.values(mats), actual: true, offset, top: h + 23.65 * u, radius: Math.hypot(w, d) / 2 };
   }
 
   // The real store building at its real size, dressed as the Grocery Bot shop of the 2D map and the
