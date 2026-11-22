@@ -41,6 +41,13 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
     assert.deepEqual(await page.evaluate(() => groceryView.world3d.landmarkStats.palace), {
       mainHeight: 19, roofWings: 3, columns: 8, continuousPortico: true,
     });
+    for (let seat = 0; seat < 12; seat++) {
+      const labels = await page.evaluate(seat => {
+        groceryView.panels.showShop(seat);
+        return document.body.innerText + ' ' + [...document.querySelectorAll('.g-row')].map(row => row.title).join(' ');
+      }, seat);
+      assert(!/\b(meny|kiwi|joker|spar|nærbutikken|jacobs)\b/i.test(labels), 'Shop labels must not advertise the source store chain');
+    }
     console.log('PASS: all 12 v2 town shops, matching player colours, compact geometry, no browser errors');
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

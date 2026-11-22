@@ -1467,7 +1467,7 @@ export async function createWorld3d(opts) {
     if (!at) return;
     ctx.globalAlpha = actor.dim;
     ctx.font = '800 12px Mulish, Arial, sans-serif';
-    const store = game.meta.players[player.seat].store?.name;
+    const store = game.meta.players[player.seat].district || '';
     const storeWidth = store ? Math.min(180, store.length * 5.8 + 16) : 0;
     const width = Math.max(storeWidth, Math.min(132, textWidth('800 12px Mulish, Arial, sans-serif', player.name) + 16)), y = at.y + 4;
     ctx.fillStyle = 'rgba(255,255,255,.94)';

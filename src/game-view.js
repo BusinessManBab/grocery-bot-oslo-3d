@@ -2,7 +2,7 @@
 import { MAP_LABELS } from './game-map-labels.js';
 import { forestPath, unpackTrees } from './forest.js?v=21';
 import { COLORS, DEFAULT_LOOK, botSvg, cleanLook, truckSvg } from './looks.js';
-import { createPanels } from './panels.js?v=21';
+import { createPanels } from './panels.js?v=26';
 
 const $ = id => document.getElementById(id);
 const code = 'PREVIEW';
@@ -20,7 +20,7 @@ grab('data/game-map.json?v=21', 'json');
 grab('data/trees.bin?v=21', 'arrayBuffer').catch(() => null);
 let view3dModule = null;
 if (wants3d) {
-  view3dModule = import('./view3d.js?v=25');
+  view3dModule = import('./view3d.js?v=26');
   for (const [url, kind] of [['data/terrain.json?v=21', 'json'], ['data/terrain.bin?v=21', 'arrayBuffer'],
     ['data/buildings.bin?v=21', 'arrayBuffer'], ['data/homes.json?v=21', 'json'], ['data/landmarks.json?v=21', 'json']]) grab(url, kind).catch(() => null);
 }
@@ -82,7 +82,7 @@ function setMeta(meta) {
     row.style.setProperty('--seat', player.colour);
     row.innerHTML = `<span class="g-rank"></span><span class="g-face">${botSvg(player.look)}</span><span class="g-who"><strong></strong><small></small></span><span class="g-score"></span>`;
     row.querySelector('strong').textContent = player.name;
-    if (player.store) row.title = `${player.store.name} · ${player.district}`;
+    if (player.store) row.title = `Grocery Bot shop${player.district ? ` · ${player.district}` : ''}`;
     row.addEventListener('click', () => { play.focus = play.focus === player.seat ? null : player.seat; panels?.showShop(player.seat); lastBoardTick = -1; });
     player.row = row;
     return row;
@@ -562,7 +562,7 @@ async function setMode(next) {
     $('message').hidden = false;
     $('message').textContent = 'Preparing Oslo…';
     await forestReady;
-    loading3d ||= (view3dModule || import('./view3d.js?v=25')).then(m => m.createWorld3d({
+    loading3d ||= (view3dModule || import('./view3d.js?v=26')).then(m => m.createWorld3d({
       host: host3d, overlay: ctx, view, town, game, play, wx, wy, truckAt, shopSign, labels: town.labels || MAP_LABELS, trees, grab, paths,
       constants: { OPEN, CLAIMED, DELIVERED, MISSED, PARKED, TRAIL, POP_TICKS, INK },
       selected: () => panels?.selectedOrder ?? null, onTap: choose, hover: pickAt,

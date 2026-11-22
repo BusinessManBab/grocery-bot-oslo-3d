@@ -119,7 +119,10 @@ replay for both; "4× CPU" is Chrome's CPU throttling, "phone" a 390 × 844 @3×
 
 The 3D view itself is checked with `tools/browser_check.cjs` and `tools/full_building_probe.cjs`.
 
-## Player shops: MENY stores
+## Player shops: real locations, unbranded presentation
+
+Players see Grocery Bot shops and district names, not store-chain names or logos.
+The source business names below are retained only for location provenance.
 
 Store names, positions and buildings come from OpenStreetMap (Overpass API, cached in
 `.cache/overpass/`; buildings the scenery snapshot lacks are taken from OSM too). They are mapped

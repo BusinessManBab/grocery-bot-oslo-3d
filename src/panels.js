@@ -45,7 +45,7 @@ export async function createPanels({ game, play, you, autoOpen = true }) {
     win.style.setProperty('--seat', player.colour);
     $('shop-title').textContent = seat === you ? 'Your shop' : `${player.name}'s shop`;
     const location = $('shop-location');
-    location.textContent = player.store ? `${player.store.name} · ${player.district}` : '';
+    location.textContent = player.store ? `Grocery Bot shop${player.district ? ` · ${player.district}` : ''}` : '';
     location.hidden = !player.store;
     $('shop-face').innerHTML = botSvg(player.look);
     iso.setPlayer(player);
