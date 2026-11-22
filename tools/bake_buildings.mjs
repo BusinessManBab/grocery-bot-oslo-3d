@@ -125,6 +125,11 @@ const homeRings = extra.homes.map(h => { const r = []; for (let i = 0; i < h.rin
 const homeBoxes = homeRings.map(r => [Math.min(...r.map(p => p[0])), Math.min(...r.map(p => p[1])), Math.max(...r.map(p => p[0])), Math.max(...r.map(p => p[1]))]);
 
 const stores = new Set(game.meta.players.filter(p => p.store?.footprint).map(p => p.store.footprint.ring.join(',')));
+const storePolygons = [...stores].map(key => {
+  const flat = key.split(',').map(Number), ring = [];
+  for (let i = 0; i < flat.length; i += 2) ring.push(toM([flat[i], flat[i + 1]]));
+  return { ring, box: [Math.min(...ring.map(p => p[0])), Math.min(...ring.map(p => p[1])), Math.max(...ring.map(p => p[0])), Math.max(...ring.map(p => p[1]))] };
+});
 const table = list => { const index = new Map(list.map((v, i) => [v, i])); return v => { if (!index.has(v)) { index.set(v, list.length); list.push(v); } return index.get(v); }; };
 const types = [], roofs = [''], colours = [''];
 const typeOf = table(types), roofOf = table(roofs), colourOf = table(colours);
@@ -139,6 +144,10 @@ extra.buildings.forEach((b, id) => {
   if (wetShare(raw) >= .5) { wet++; return; }
   // a background footprint in the same place as a delivery home: the home is drawn, not both
   const m = raw.map(toM), box = [Math.min(...m.map(p => p[0])), Math.min(...m.map(p => p[1])), Math.max(...m.map(p => p[0])), Math.max(...m.map(p => p[1]))];
+  // OSM can describe the host both as an outline and overlapping building parts.
+  // Remove those too; deleting only the identical ring leaves shops inside a mall.
+  if (storePolygons.some(s => !(s.box[0] > box[2] || s.box[2] < box[0] || s.box[1] > box[3] || s.box[3] < box[1])
+    && (share(s.ring, m) >= .7 || share(m, s.ring) >= .7))) { dropped++; return; }
   for (let h = 0; h < homeRings.length; h++) {
     const hb = homeBoxes[h];
     if (hb[0] > box[2] || hb[2] < box[0] || hb[1] > box[3] || hb[3] < box[1]) continue;

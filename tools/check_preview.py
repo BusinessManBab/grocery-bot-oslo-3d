@@ -2,6 +2,7 @@
 import json
 import math
 import hashlib
+import struct
 from pathlib import Path
 
 DATA = Path(__file__).resolve().parents[1] / "data"
@@ -65,6 +66,17 @@ assert all(s.get("parts") or s["build"] == "model" for s in landmarks["sites"])
 bin_header = baked("buildings.bin", ["buildings.json", "game-map.json", "game.json", "landmarks.json"])
 assert bin_header["count"] > 54000 and sum(c[1] for c in bin_header["chunks"]) == bin_header["count"]
 assert bin_header["bounds"] == town["bounds"]
+# Shop models replace their host buildings; never leave the mall behind them.
+raw = (DATA / "buildings.bin").read_bytes()
+body_start = 4 + int.from_bytes(raw[:4], "little")
+id_layout = next(item for item in bin_header["layout"] if item["name"] == "id")
+assert id_layout["type"] == "Uint16"
+resident_ids = set(struct.unpack_from(f"<{id_layout['length']}H", raw, body_start + id_layout["offset"]))
+store_rings = {tuple(p["store"]["footprint"]["ring"]) for p in game["meta"]["players"]}
+host_ids = {i for i, b in enumerate(buildings["buildings"]) if tuple(b[1:]) in store_rings}
+# Two stores have synthetic footprints, so there is no source building to remove.
+assert host_ids, "Expected mapped host buildings for the player shops"
+assert not (host_ids & resident_ids), "Original shop buildings must be absent from the rendered city"
 assert [(h["p"], h["ring"]) for h in load("homes.json")["homes"]] == [(h["p"], h["ring"]) for h in buildings["homes"]]
 tree_header = baked("trees.bin", ["game-map.json", "buildings.json", "landcover.json", "game.json", "homes.json", "landmarks.json"])
 assert tree_header["forest"] > 1000 and tree_header["parks"] > 500, tree_header

@@ -16,7 +16,8 @@ Playback opens at tick 120 with deliveries in motion; scrub back or use `?t=0` f
   twelve MENY stores on the map that have delivery homes around them. The other four MENY on the
   map (Bryn, Manglerud, Vollebekk, Gressbanen) lie where no delivery homes are; other NorgesGruppen
   stores (KIWI, Joker, SPAR, Nærbutikken) would only be used if MENY could not fill the seats.
-  Each shop is drawn as the Grocery Bot shop of the 2D map on its real store building.
+  Each original store building is removed and replaced by the compact red Grocery Bot shop
+  from the other towns' 2D map, with a pale roof, white fascia, blue windows and Grocery Bot sign.
 - **397 delivery homes**: 160 real Kartverket addresses plus 237 explicitly labelled
   delivery-building points on real footprints near the shops. These new building
   points are not presented as verified postal addresses. OpenStreetMap streets, parks and water,
@@ -27,8 +28,8 @@ Playback opens at tick 120 with deliveries in motion; scrub back or use `?t=0` f
   **Every building's complete walls and roof are built and stay resident**: they stream in
   nearest-first while the page opens and are all in place within seconds. No distance-based
   wall hiding, level of detail or geometry swapping happens while moving the camera.
-  The twelve shop buildings keep their real size and are dressed as the Grocery Bot shop
-  (cream walls, player-colour band, striped awning, sign). There are about **54,200 background buildings** plus the
+  The twelve shops use the same small original 2D-style model, not the height or outline of
+  the real store or mall they replace. There are about **54,200 background buildings** plus the
   delivery homes. Real elevation now spans **0–377 m**, on a **711 × 668** height grid.
 - **Oslo's landmarks, true to life** (`src/landmarks.js`, data from `tools/bake_landmarks.py`).
   The plain building data missed or flattened Oslo's famous buildings (OpenStreetMap maps them

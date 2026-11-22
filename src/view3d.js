@@ -706,35 +706,41 @@ export async function createWorld3d(opts) {
 
   function buildShop(player) {
     const store = game.meta.players[player.seat].store;
-    if (store?.footprint) return fittedShop(player, store.footprint);
-    // 2D: 62 x 34 px body, 6 px roof band, 8 striped awning tiles, window left, door right, sign above.
-    const mats = { frame: lit('#583a2d'), wall: lit('#fff3da'), paint: lit(player.colour), glass: lit('#b6d4d7'), door: lit('#65493a'),
-      sign: new THREE.MeshLambertMaterial({ map: signTexture }), post: lit('#583a2d') };
+    // Original shopSVG(), grocery-bot/prototypes/town-rush/game-actors.js:
+    // red walls, pale inset flat roof, white fascia, blue windows and dark door.
+    // Never stretch this little shop to the height or outline of its host mall.
+    const mats = { frame: lit('#e3dcd5'), wall: lit('#c8102e'), side: lit('#a20c28'),
+      fascia: lit('#fffaf5'), glass: lit('#9ccbd0'), door: lit('#3d3532'),
+      sign: new THREE.MeshLambertMaterial({ map: signTexture }), roof: lit('#f8f5ef') };
     const g = new THREE.Group();
-    const w = 62, h = 34, d = 34, front = d / 2;
-    g.add(box(w, 1.6, d + 2, mats.frame, 0, .8, 0));                        // plinth
-    g.add(box(w - .4, 30, d + 1.6, mats.frame, 0, -15, 0));                 // footing down the slope
-    g.add(box(w - 3, h, d - 3, mats.wall, 0, h / 2, 0));                    // cream walls
-    for (const sx of [-1, 1]) for (const sz of [-1, 1]) g.add(box(2.4, h, 2.4, mats.frame, sx * (w / 2 - 1.2), h / 2, sz * (d / 2 - 1.2)));
-    g.add(box(w + 1, 6, d + 1, mats.paint, 0, h + 3, 0));                   // colour band (the 2D top stripe)
-    g.add(box(w + 1, 1.2, d + 1, mats.frame, 0, h + 6.6, 0));               // roof edge
-    g.add(box(w - 6, .8, d - 6, mats.frame, 0, h + 6.4, 0));
-    // striped awning across the front, 8 tiles alternating player colour and cream
-    for (let i = 0; i < 8; i++) {
-      const tile = box(w / 8 + .05, .9, 7, i % 2 ? mats.wall : mats.paint, -w / 2 + w / 16 + i * w / 8, h - 1.4, front + 3);
-      tile.rotation.x = .5;
-      g.add(tile);
-    }
-    g.add(box(w * .34, h * .42, .8, mats.glass, -w * .2, h * .4, front - 1));  // shop window
-    g.add(box(w * .2, h * .62, .8, mats.door, w * .22, h * .31 + 1.6, front - 1));   // door
-    // GROCERY BOT sign on two posts, like the 2D sign floating above the roof
-    const sign = new THREE.Mesh(new THREE.BoxGeometry(46, 15.3, 1.4), [mats.paint, mats.paint, mats.paint, mats.paint, mats.sign, mats.sign]);
-    sign.position.set(0, h + 16, front - 6);
-    sign.castShadow = true;
+    const w = 18 * M, d = 12 * M, h = 6.5 * M * LIFT, front = d / 2;
+    g.add(box(w, h + 2 * M, d, mats.wall, 0, h / 2 - M, 0));
+    g.add(box(.08 * M, h, d, mats.side, -w / 2 - .02 * M, h / 2, 0));
+    g.add(box(w + .8 * M, .45 * M, d + .8 * M, mats.frame, 0, h + .225 * M, 0));
+    g.add(box(w - 1.4 * M, .12 * M, d - 1.4 * M, mats.roof, 0, h + .51 * M, 0));
+    g.add(box(w + .1 * M, .55 * M, .18 * M, mats.fascia, 0, h - .6 * M, front + .08 * M));
+    g.add(box(w * .29, h * .42, .15 * M, mats.glass, w * .24, h * .52, front + .08 * M));
+    g.add(box(w * .23, h * .74, .18 * M, mats.door, -w * .18, h * .37, front + .09 * M));
+    g.add(box(.15 * M, h * .42, d * .62, mats.glass, -w / 2 - .09 * M, h * .52, 0));
+    const sign = box(8 * M, 8 * M / 3, .2 * M, mats.sign, 0, h + 1.9 * M, 0);
     g.add(sign);
-    for (const sx of [-1, 1]) g.add(box(1.6, 9, 1.6, mats.post, sx * 14, h + 9, front - 6));
-    g.traverse(o => { if (o.isMesh) o.renderOrder = 30; });
-    return { group: g, mats: Object.values(mats) };
+    const ring = store?.footprint?.ring;
+    let x = player.shop[0], z = player.shop[1];
+    if (ring?.length) {
+      const xs = [], zs = [];
+      for (let i = 0; i < ring.length; i += 2) { xs.push(wx(ring[i])); zs.push(wy(ring[i + 1])); }
+      x = (Math.min(...xs) + Math.max(...xs)) / 2;
+      z = (Math.min(...zs) + Math.max(...zs)) / 2;
+    }
+    const offset = [x - player.shop[0], z - player.shop[1]];
+    g.position.set(offset[0], 0, offset[1]);
+    const wrapper = new THREE.Group();
+    wrapper.add(g);
+    wrapper.userData.shopStyle = 'original-2d';
+    wrapper.userData.shopSeat = player.seat;
+    wrapper.userData.shopAt = [x, z];
+    wrapper.traverse(o => { if (o.isMesh) o.renderOrder = 30; });
+    return { group: wrapper, mats: Object.values(mats), actual: true, offset, top: h + 3.3 * M, radius: Math.hypot(w, d) / 2 };
   }
 
   // The real store building at its real size, dressed as the Grocery Bot shop of the 2D map and the
@@ -1345,7 +1351,7 @@ export async function createWorld3d(opts) {
       actor.shop.group.scale.setScalar(actor.shop.actual ? 1 : SHOP_SCALE * actor.grow);
       {
         // stand on the highest corner; the footing covers the downhill side
-        const sx = player.shop[0], sz = player.shop[1], hw = 31 * SHOP_SCALE * actor.grow, hd = 18 * SHOP_SCALE * actor.grow;
+        const sx = player.shop[0] + (actor.shop.offset?.[0] || 0), sz = player.shop[1] + (actor.shop.offset?.[1] || 0), hw = 31 * SHOP_SCALE * actor.grow, hd = 18 * SHOP_SCALE * actor.grow;
         actor.base = actor.shop.actual ? heightAt(sx, sz) : Math.max(heightAt(sx, sz), heightAt(sx - hw, sz - hd), heightAt(sx + hw, sz - hd), heightAt(sx - hw, sz + hd), heightAt(sx + hw, sz + hd));
         actor.shop.group.position.y = actor.base;
         const S = SHOP_SCALE * actor.grow, mid = project(sx, actor.base + 22 * S, sz), side = project(sx + 31 * S, actor.base + 22 * S, sz);
@@ -1438,7 +1444,7 @@ export async function createWorld3d(opts) {
 
   function drawPill(actor, grow) {
     const { player } = actor;
-    const at = actor.shop.actual ? project(player.shop[0], (actor.base ?? 0) + actor.shop.top + 5, player.shop[1]) :
+    const at = actor.shop.actual ? project(player.shop[0] + (actor.shop.offset?.[0] || 0), (actor.base ?? 0) + actor.shop.top + 5, player.shop[1] + (actor.shop.offset?.[1] || 0)) :
       project(player.shop[0], actor.base ?? 0, player.shop[1] + 26 * SHOP_SCALE * grow);
     if (!at) return;
     ctx.globalAlpha = actor.dim;
