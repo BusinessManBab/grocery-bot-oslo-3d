@@ -8,13 +8,21 @@
 // Museum's sail roofs, the Fram Museum's A-frames and the Vigeland Monolith.
 // Everything is merged into one mesh per material: about ten draw calls for all of it.
 import * as THREE from 'three';
-import { Bucket, linear, quad, tri } from './building-geometry.js?v=20';
+import { Bucket, linear, quad, tri } from './building-geometry.js?v=21';
 import { Earcut } from './vendor/earcut.js';
 
 // facade tile: [bay width m, storey height m]
 const TILE = { glass: [3, 3.6], tower: [1.8, 3.6], brick: [3.6, 4.2], classic: [4.6, 5.2], castle: [7, 6], slate: [9, 8],
-  alabaster: [3, 3], munch: [1.4, 4], aluminium: [2.4, 3], timber: [.6, 4], dark: [3, 3.6], stripes: [2, 3.6], church: [5.5, 11] };
-const NAMED = { white: '#f4f2ec', grey: '#9a9894', gray: '#9a9894', lightgrey: '#c9c7c2', black: '#3a3a3c', yellow: '#e8cf72' };
+  marble: [3, 3], foyer: [3, 7], alabaster: [3, 3], munch: [1.4, 4], aluminium: [2.4, 3], timber: [.6, 4], dark: [3, 3.6], stripes: [2, 3.6], church: [5.5, 11] };
+const NAMED = { white: '#f4f2ec', grey: '#9a9894', gray: '#9a9894', lightgrey: '#c9c7c2', darkgrey: '#5d5d5d', black: '#3a3a3c', yellow: '#e8cf72',
+  red: '#a24a3c', brown: '#7a5a44', green: '#6f9a85', beige: '#e6dbc2', blue: '#7f9ab3' };
+// OSM building:material -> facade and colour; roof:material -> roof colour
+const MATERIAL = { glass: ['glass', '#9cc0c8'], brick: ['brick', '#9a5546'], stone: ['castle', '#d3ccbc'], limestone: ['classic', '#e4dccb'],
+  concrete: ['aluminium', '#e4e2dc'], plaster: ['classic', '#efe6cf'], metal: ['aluminium', '#c6cacd'], mirror: ['dark', '#5d7380'],
+  wood: ['timber', '#b98f62'], copper: ['alabaster', '#6f9a85'] };
+MATERIAL.mirror = ['glass', '#aebfc8'];                    // mapped "mirror" facades read as light glass in photos
+const ROOF_MATERIAL = { concrete: '#e2e0da', tar_paper: '#6c6966', metal: '#9aa1a6', copper: '#6f9a85', roof_tiles: '#9b5a45', tile: '#9b5a45',
+  slate: '#55595c', glass: '#a9c7d1', grass: '#8fae6a', plaster: '#e9e2d0', limestone: '#e4dccb', cobblestone: '#8d8a84', stone: '#a8a294' };
 
 function facadeTexture(kind) {
   const c = document.createElement('canvas');
@@ -28,7 +36,15 @@ function facadeTexture(kind) {
     g.fillStyle = 'rgba(255,255,255,.28)';
     g.beginPath(); g.moveTo(x + f + 2, y + h - f - 4); g.lineTo(x + f + 10, y + f + 2); g.lineTo(x + f + 15, y + f + 2); g.lineTo(x + f + 7, y + h - f - 4); g.fill();
   };
-  if (kind === 'glass' || kind === 'dark') {
+  if (kind === 'marble') {
+    g.fillStyle = '#faf9f5'; g.fillRect(0, 0, 128, 128);
+    g.fillStyle = '#e9e7e0'; g.fillRect(0, 0, 128, 1); g.fillRect(0, 0, 1, 128);
+  } else if (kind === 'foyer') {
+    // Tall clear glazing, not the dark, diagonally patterned office curtain wall.
+    g.fillStyle = '#c1ddd9'; g.fillRect(0, 0, 128, 128);
+    g.fillStyle = '#e6efea'; g.fillRect(0, 0, 3, 128); g.fillRect(0, 0, 128, 2);
+    g.fillStyle = 'rgba(255,255,255,.12)'; g.fillRect(8, 0, 20, 128);
+  } else if (kind === 'glass' || kind === 'dark') {
     g.fillStyle = kind === 'dark' ? '#3b4650' : '#7f9aab'; g.fillRect(0, 0, 128, 128);      // curtain wall
     g.fillStyle = kind === 'dark' ? '#5b6670' : '#a9bcc8'; g.fillRect(0, 0, 128, 6); g.fillRect(0, 0, 5, 128);
     g.fillStyle = 'rgba(255,255,255,.18)'; g.beginPath(); g.moveTo(14, 120); g.lineTo(60, 10); g.lineTo(84, 10); g.lineTo(38, 120); g.fill();
@@ -176,80 +192,6 @@ export function buildLandmarks({ data, heightAt, wx, wy, M, LIFT, scene, wallTin
 
   // ---- hand models -----------------------------------------------------------------------------
   const MODELS = {
-    // Oslo Opera House (Snøhetta, 2008), from photos and the orthophoto, on its OSM outline
-    // (local metres: u east along the building, v north; the fjord is west and south):
-    //  - a low marble plaza on the west, at the water
-    //  - the south ramp: one plane rising east from the west tip to the roof (23 m), one rising
-    //    north from the plinth along the fjord; they meet in the diagonal crease seen from the air
-    //  - the north wing, rising east over a long low glass facade to the same roof
-    //  - the roof plateau with its knife-thin overhanging edge over the glazed foyer, the white
-    //    stage towers (35 m and 28 m), and the aluminium-clad workshops to the east (20 m)
-    opera(site) {
-      const f = frameOf(site);
-      const outline = [[-112, -15], [-115, 57], [55, 55], [55, 57], [109, 50], [109, 15], [108, 15], [106, 4], [110, 2], [112, -62], [38, -52], [37, -65], [-111, -45], [-112, -21], [-114, -16]];
-      const base = baseOf(outline.map(([u, v]) => f(u, v)));
-      const P = (u, v, h) => { const [x, z] = f(u, v); return [x, base + h * K, z]; };
-      const marble = linear('#f4f2ec'), marbleSide = linear('#e3e0d8'), PLAZA = 1.2, ROOF = 23;
-      // the slopes meet the glazed foyer well below its roof, as in the photos: the ramp reaches the
-      // roof level only further east, south of the stage tower
-      const carpet = u => ROOF * (u + 112) / 112;                      // 0 at the west tip, 23 at u = 0
-      const front = (u, v) => 25.47 + .0551 * u + .4078 * v;          // 1 m along the fjord edge, 23 at the crest
-      const wing = u => PLAZA + (13 - PLAZA) * (u + 75) / 45;          // 13 m where it meets the foyer
-      // a flat-shaded convex polygon of (u, v) points at heights h(u, v)
-      const facet = (pts, h, c = marble) => { for (let i = 1; i < pts.length - 1; i++) tri(plain, [P(...pts[0], h(...pts[0])), P(...pts[i], h(...pts[i])), P(...pts[i + 1], h(...pts[i + 1]))], c); };
-      // split a convex polygon where g(u, v) changes sign: [part with g <= 0, part with g >= 0]
-      const split = (pts, g) => {
-        const lo = [], hi = [];
-        for (let i = 0; i < pts.length; i++) {
-          const A = pts[i], B = pts[(i + 1) % pts.length], ga = g(...A), gb = g(...B);
-          if (ga <= 0) lo.push(A); if (ga >= 0) hi.push(A);
-          if ((ga < 0 && gb > 0) || (ga > 0 && gb < 0)) { const t = ga / (ga - gb), X = [A[0] + (B[0] - A[0]) * t, A[1] + (B[1] - A[1]) * t]; lo.push(X); hi.push(X); }
-        }
-        return [lo, hi];
-      };
-      // a wall along (u, v) points between heights lo(u, v) and hi(u, v)
-      const wall = (pts, lo, hi, kind, c) => {
-        const b = kind ? bucket(kind) : plain, [bay, storey] = TILE[kind] || [3, 3.5];
-        let run = 0;
-        for (let i = 0; i < pts.length - 1; i++) {
-          const A = pts[i], B = pts[i + 1], len = Math.hypot(B[0] - A[0], B[1] - A[1]);
-          const corners = [P(...A, lo(...A)), P(...B, lo(...B)), P(...B, hi(...B)), P(...A, hi(...A))];
-          const uv = [[run / bay, lo(...A) / storey], [(run + len) / bay, lo(...B) / storey], [(run + len) / bay, hi(...B) / storey], [run / bay, hi(...A) / storey]];
-          quad(b, corners, c, kind ? uv : undefined);
-          run += len;
-        }
-      };
-      const ground = () => -1.5 / K;
-      // the south ramp: carpet and front planes, split along their crease
-      const crease = (u, v) => carpet(u) - front(u, v);
-      const [west1, west2] = split([[-111.5, -30], [-111, -45], [-30, -55.9], [-30, -30]], crease);
-      if (west1.length >= 3) facet(west1, u => carpet(u));
-      if (west2.length >= 3) facet(west2, (u, v) => front(u, v));
-      facet([[-30, -55.9], [37, -65], [38, -30], [-30, -30]], (u, v) => front(u, v));
-      wall([[-111.5, -30], [-30, -30]], () => PLAZA, u => Math.max(PLAZA, Math.min(carpet(u), front(u, -30))), null, marbleSide);   // the ramp's side
-      const rampEdge = [[-111.5, -30], [-111, -45], [-30, -55.9], [37, -65], [38, -52]];
-      wall(rampEdge, ground, (u, v) => Math.max(.3, Math.min(carpet(u), front(u, v))), null, marbleSide);
-      // the plaza and the north wing over its long low glass facade
-      // the flat plaza runs right up to the foyer's glass, as in the photos
-      cap([[[-115, 57], [-75, 57], [-75, 27], [-30, 27], [-30, -30], [-111.5, -30], [-112, -21], [-112, -15], [-114, -16]].map(([u, v]) => f(u, v))], base + PLAZA * K, marble);
-      wall([[-111.5, -30], [-112, -21], [-112, -15], [-114, -16], [-115, 57], [-75, 57]], ground, () => PLAZA, null, marbleSide);
-      facet([[-75, 27], [-3, 27], [-3, 56], [-75, 57]], u => wing(u));
-      wall([[-75, 27], [-30, 27]], () => PLAZA, u => wing(u), 'glass', linear('#9cc0c8'));
-      wall([[-75, 57], [-3, 56]], ground, u => wing(u), null, marbleSide);
-      // the plateau: glazed foyer under a thin marble roof slab overhanging by 2.5 m
-      const glass = linear('#9cc0c8');
-      wall([[-3, 56], [-3, 27], [-30, 27], [-30, -30], [50, -30]], ground, () => ROOF - .9, 'glass', glass);
-      wall([[50, 55], [-3, 56]], ground, () => ROOF - .9, 'aluminium', linear('#eeece6'));
-      const slab = [[-32.5, -32.5], [50, -32.5], [50, 55], [-3, 56], [-3, 29.5], [-32.5, 29.5]];
-      wall([...slab, slab[0]], () => ROOF - .9, () => ROOF, null, marbleSide);
-      cap([slab.map(([u, v]) => f(u, v))], base + ROOF * K, marble);
-      cap([slab.map(([u, v]) => f(u, v))], base + (ROOF - .9) * K, marbleSide, true);
-      // stage towers in white aluminium, and the workshops with their skylit box
-      box('alabaster', f, 0, 27, -30, 3, base, 0, 35, '#eeece6', '#dddbd5');
-      box('alabaster', f, 27, 50, 14, 39, base, 0, 28, '#eeece6', '#dddbd5');
-      prism('aluminium', [[[50, 55], [55, 55], [55, 57], [109, 50], [109, 15], [108, 15], [106, 4], [110, 2], [112, -62], [38, -52], [38, -30], [50, -30]].map(([u, v]) => f(u, v))], base, 0, 20, '#e9e8e3', '#cfd0cc');
-      box('aluminium', f, 55, 85, -45, -20, base, 20, 22.5, '#e9e8e3', '#a9c4cf');
-    },
     // MUNCH (Estudio Herreros, 2021): a 60 m tower in perforated aluminium on a wider base, its top
     // bending over towards the city (the sideways step the OSM parts record, made a smooth bend).
     munch(site) {
@@ -327,121 +269,150 @@ export function buildLandmarks({ data, heightAt, wx, wy, M, LIFT, scene, wallTin
   };
 
   // ---- sites built from their OSM parts ----------------------------------------------------------
+  // Walls follow the roof; roofs: flat, skillion (roof:direction is the downhill compass bearing),
+  // gabled, hipped, pyramidal, dome, onion, cone. Against flicker, each part's roof is lifted a few
+  // millimetres more than the one before (overlapping parts never share a plane) and a raised part's
+  // floor sits just above the roof below it.
   const centre = pts => { let x = 0, z = 0; for (const p of pts) { x += p[0]; z += p[1]; } return [x / pts.length, z / pts.length]; };
-  const radius = (pts, [cx, cz]) => Math.max(...pts.map(([x, z]) => Math.hypot(x - cx, z - cz)));
+  const radius = (pts, [cx, cz]) => pts.reduce((m, [x, z]) => Math.max(m, Math.hypot(x - cx, z - cz)), 0);
+  function roofed(p, base, index, kind, wallHex, roofHex) {
+    const rings = p.rings.map(ringPts).map((r, i) => (i === 0 ? ccw(r) : ccw(r).reverse())), outer = rings[0];
+    if (outer.length < 3) return;
+    const top = p.max + index * .004, shape = p.roof?.shape || 'flat';
+    const { s0, s1, t0, t1 } = axes(outer), width = (t1 - t0) / M, c = centre(outer), r = radius(outer, c);
+    const defaults = { gabled: width * .4, hipped: width * .35, pyramidal: width * .6, dome: r / M, onion: r / M * 1.5, cone: r / M * 2, skillion: 2, round: r / M };
+    let rise = shape === 'flat' ? 0 : Math.max(0, Math.min(p.roof?.height ?? defaults[shape] ?? 0, top - p.min - .3));
+    const y0 = p.min > 0 ? base + (p.min + .15) * K : base - 1.5, eave = base + (top - rise) * K;
+    // skillion: a plane falling towards roof:direction
+    let roofAt = () => eave;
+    if (shape === 'skillion' && rise > 0) {
+      const d = (p.roof?.direction ?? 0) * Math.PI / 180, dx = Math.sin(d), dz = -Math.cos(d);
+      const ss = outer.map(([x, z]) => x * dx + z * dz), lo = Math.min(...ss), hi = Math.max(...ss);
+      roofAt = (x, z) => base + (top - rise * ((x * dx + z * dz - lo) / (hi - lo || 1))) * K;
+    } else if (shape === 'flat') roofAt = () => base + top * K;
+    // walls
+    const [bay, storey] = TILE[kind] || [3, 3.5], wb = bucket(kind), wc = linear(wallHex);
+    for (const ring of rings) {
+      let run = 0;
+      for (let i = 0; i < ring.length; i++) {
+        const a = ring[i], b2 = ring[(i + 1) % ring.length], len = Math.hypot(b2[0] - a[0], b2[1] - a[1]);
+        const ya = roofAt(a[0], a[1]), yb = roofAt(b2[0], b2[1]);
+        quad(wb, [[a[0], y0, a[1]], [b2[0], y0, b2[1]], [b2[0], yb, b2[1]], [a[0], ya, a[1]]], wc,
+          [[run / (bay * M), 0], [(run + len) / (bay * M), 0], [(run + len) / (bay * M), (yb - y0) / (storey * K)], [run / (bay * M), (ya - y0) / (storey * K)]]);
+        run += len;
+      }
+    }
+    if (p.min > 0) cap(rings, y0, shade(wallHex, .6), true);
+    // roof
+    const rc = linear(roofHex);
+    if (shape === 'flat' || shape === 'skillion' || rise <= 0) {
+      const flat = [], holes = [], all = [];
+      for (const ring of rings) { if (all.length) holes.push(all.length); for (const q of ring) { flat.push(q[0], q[1]); all.push(q); } }
+      const t = Earcut.triangulate(flat, holes);
+      for (let i = 0; i < t.length; i += 3) tri(plain, [t[i], t[i + 2], t[i + 1]].map(k => [all[k][0], roofAt(all[k][0], all[k][1]), all[k][1]]), rc);
+      return;
+    }
+    cap(rings, eave, rc);                                   // closes any gap between walls and roof
+    if (shape === 'gabled' || shape === 'hipped') {
+      roof(shape, outer, eave, rise * K, roofHex);
+    } else if (shape === 'pyramidal') {
+      const apex = [c[0], eave + rise * K, c[1]];
+      for (let i = 0; i < outer.length; i++) { const a = outer[i], b2 = outer[(i + 1) % outer.length]; tri(plain, [[a[0], eave, a[1]], [b2[0], eave, b2[1]], apex], rc); }
+    } else {                                                // dome, onion, cone, round: a turned profile
+      const prof = shape === 'onion' ? [[1, 0], [1.22, .25], [1.1, .5], [.6, .78], [.15, .95], [0, 1]]
+        : shape === 'cone' ? [[1, 0], [0, 1]] : [[1, 0], [.95, .3], [.8, .58], [.55, .82], [.25, .96], [0, 1]];
+      for (let k = 0; k < prof.length - 1; k++) cone(c[0], c[1], eave + prof[k][1] * rise * K, eave + prof[k + 1][1] * rise * K, r * prof[k][0], r * prof[k + 1][0], roofHex, 12);
+    }
+  }
+  const FAMOUS = new Set(['opera', 'radhus', 'slottet', 'akershus']);
   for (const site of data.sites) {
     stats.sites++;
     stats.names.push(site.name);
     if (site.build === 'model') { MODELS[site.id]?.(site); continue; }
-    let parts = site.parts || [];
+    const parts = site.parts || [];
     const base = baseOf(parts.flatMap(p => ringPts(p.rings[0])));
-    // The City Hall's towers: east 66 m, west 63 m (OSM rounds both up to 74 m with their roof gear)
-    let east = null, west = null;
-    if (site.id === 'radhus') {
-      const towers = parts.filter(q => q.max >= 60).sort((p, q) => centre(ringPts(p.rings[0]))[0] - centre(ringPts(q.rings[0]))[0]);
-      west = towers[0] && { ...towers[0], max: 63 };
-      east = towers[1] && { ...towers[1], max: 66 };
-      parts = parts.map(q => (q === towers[0] ? west : q === towers[1] ? east : q));
-    }
     const tallest = parts.reduce((m, p) => (p.max > (m?.max ?? -1) ? p : m), null);
-    const small = p => { const { s0, s1, t0, t1 } = axes(ringPts(p.rings[0])); return (s1 - s0) / M <= 8 && (t1 - t0) / M <= 8; };
     parts.forEach((p, i) => {
-      let kind = site.facade || 'glass', wallHex = colourOf(p.colour, site.colour || '#d8d4cc');
+      const mat = MATERIAL[p.material];
+      let kind = mat?.[0] || site.facade || 'glass';
+      let wallHex = colourOf(p.colour, mat?.[1] || site.colour || '#d8d4cc');
+      let roofHex = colourOf(p.roofColour, ROOF_MATERIAL[p.roofMaterial] || null) || '#' + new THREE.Color(wallHex).multiplyScalar(.8).getHexString();
       if (site.facade === 'barcode') {           // Barcode: each tower in its own skin
         kind = ['glass', 'stripes', 'dark', 'tower', 'glass', 'aluminium'][i % 6];
         wallHex = ['#8fa6b4', '#e8e6e1', '#53606b', '#dcdad5', '#a8b8c2', '#d6d8d6'][i % 6];
       }
-      if (site.id === 'radhus') wallHex = '#8a4b3d';                       // dark brown-red brick
-      if (site.id === 'slottet' && p.min === 0) { kind = 'classic'; wallHex = '#e1d1a8'; }   // ground floor, same cream
-      if (site.id === 'akershus') {
-        if (p.min === 0 && p.colour === '#ffcb7e') wallHex = '#e6c27c';     // the ochre guardhouse
-        else if (p.min === 0) wallHex = '#a39b8d';                          // the rock and ramparts
-        else if (p.rings[0].length === 16 && p.min >= 19) { kind = 'alabaster'; wallHex = '#5d8b76'; }   // copper lantern stages
-        else wallHex = '#ece5d4';                                           // pale plaster walls
+      // the most famous buildings, coloured as in photographs
+      if (site.id === 'opera') {                  // white marble and aluminium, glass foyer, walkable white roofs
+        // The broad 20 m ramp has a glass tag in the source, but its exposed
+        // wedges are marble. Only the separate, shallow-pitched foyer is glazed.
+        const ramp = p.roof?.shape === 'skillion' && (p.roof.height ?? 0) > p.max * .8;
+        const glassy = p.material === 'glass' && !ramp;
+        kind = glassy ? 'foyer' : ramp || p.max <= 2 ? 'marble' : p.max >= 25 ? 'alabaster' : 'aluminium';
+        wallHex = glassy ? '#edf8f2' : '#faf8f2';
+        roofHex = p.roof?.shape === 'skillion' || p.max <= 2 || p.max >= 23 ? '#faf8f2' : '#e9e7df';
       }
-      if (site.id === 'domkirke') kind = wallHex === '#b2cb65' ? 'alabaster' : 'church';   // copper tower top, arched windows
-      const roofHex = site.id === 'akershus' || site.id === 'slottet' ? null : undefined;
+      if (site.id === 'radhus') { kind = 'brick'; wallHex = p.max < 27.5 && p.min > 26 ? wallHex : '#8a4b3d'; roofHex = '#57504c'; }
+      if (site.id === 'slottet') { kind = 'classic'; wallHex = p.min === 0 ? '#ecdfb6' : '#f3e6bb'; roofHex = '#7d8790'; }
+      if (site.id === 'akershus') {
+        if (p.material === 'copper') { kind = 'alabaster'; wallHex = '#6f9a85'; }
+        else if (p.colour === '#ffcb7e' && p.max <= 8) wallHex = '#e6c27c';
+        else if (p.min === 0 && p.max <= 10) wallHex = '#a39b8d';           // the rock and ramparts
+        else { kind = 'castle'; wallHex = '#ece5d4'; }                      // pale plaster walls
+        if (p.roofMaterial === 'roof_tiles') roofHex = '#8a5443';
+      }
       if (site.extras === 'light-hall' && p === tallest) {
-        // Nasjonalmuseet: slate below, the alabaster light hall along the top
-        prism(kind, p.rings.map(ringPts), base, p.min, 19, wallHex, roofHex);
-        prism('alabaster', p.rings.map(ringPts), base, 19, p.max, '#efe8d6');
-      } else prism(kind, p.rings.map(ringPts), base, p.min, p.max, wallHex, roofHex);
+        roofed({ ...p, max: 19, roof: { shape: 'flat' } }, base, i, kind, wallHex, roofHex);
+        roofed({ ...p, min: 19 }, base, i, 'alabaster', '#efe8d6', '#e9e3d2');
+      } else roofed(p, base, i, kind, wallHex, roofHex);
       stats.parts++;
     });
-    if (site.id === 'akershus') {
-      // steep red-brown tile roofs on the castle wings; slender copper spires on its two towers
-      for (const p of parts.filter(q => q.min >= 10 && q.rings[0].length !== 16 && !small(q))) {
-        const pts = ringPts(p.rings[0]), { s0, s1, t0, t1 } = axes(pts);
-        roof((s1 - s0) / Math.max(1e-6, t1 - t0) < 1.5 ? 'hipped' : 'gabled', pts, base + p.max * K, (t1 - t0) / 2 * 1.1, '#7a4d3f');
-      }
-      const tops = parts.filter(q => q.rings[0].length === 16 && q.max >= 34);
-      for (const p of tops) {
-        const pts = ringPts(p.rings[0]), c = centre(pts), y = base + p.max * K;
-        cone(c[0], c[1], y, y + 15 * K, radius(pts, c) * 1.15, 0, '#5d8b76', 8);
-      }
-    }
+    // details only on the most famous buildings
     if (site.id === 'slottet') {
-      // low hipped zinc roofs, and the columned portico with its pediment on the main front (east)
-      for (const p of parts.filter(q => q.min > 0)) { const pts = ringPts(p.rings[0]); roof('hipped', pts, base + p.max * K, (axes(pts).t1 - axes(pts).t0) * .18, '#7d8790'); }
-      const main = parts.filter(q => q.min > 0).sort((a, b) => b.max - a.max || b.rings[0].length - a.rings[0].length)[0];
-      if (main) {
-        const pts = ringPts(main.rings[0]), { s0, s1, t0, t1, at } = axes(pts);
-        // the long side facing east (+x), towards Karl Johans gate
-        const sm = (s0 + s1) / 2, front = at(sm, t1)[0] > at(sm, t0)[0] ? t1 : t0, out = front === t1 ? 1 : -1;
-        const y0 = base + main.min * K, y1 = base + (main.max - 4) * K, depth = 6 * M;
-        for (let c = -2.5; c <= 2.5; c++) {
-          const [cx, cz] = at(sm + c * 3.2 * M, front + out * (depth - .8 * M));
-          cone(cx, cz, y0, y1, .75 * M, .65 * M, '#f7f1de', 10);
-        }
-        const A = at(sm - 9.5 * M, front), B = at(sm + 9.5 * M, front), C = at(sm + 9.5 * M, front + out * depth), D = at(sm - 9.5 * M, front + out * depth);
-        prism('classic', [[A, B, C, D]], base, main.max - 4, main.max - 2.6, '#f7f1de');
-        const peak = base + (main.max + .8) * K, ridgeA = at(sm, front), ridgeB = at(sm, front + out * depth), lo = base + (main.max - 2.6) * K;
+      // low hipped zinc roofs on the upper floors, and the columned portico facing Karl Johans gate
+      for (const p of parts.filter(q => q.min > 0)) { const pts = ringPts(p.rings[0]); roof('hipped', pts, base + (p.max + .05) * K, (axes(pts).t1 - axes(pts).t0) * .16, '#7d8790'); }
+      // the portico stands at the middle of the palace's east front (all its parts together)
+      const upper = parts.filter(q => q.min > 0), all = upper.flatMap(q => ringPts(q.rings[0]));
+      if (upper.length) {
+        const { s0, s1, t0, t1, at } = axes(all.length > 2 ? all : ringPts(upper[0].rings[0]));
+        const floor = Math.min(...upper.map(q => q.min)), roofTop = Math.max(...upper.map(q => q.max));
+        const ends = [{ a: at(s0, t0), b: at(s1, t0) }, { a: at(s1, t1), b: at(s0, t1) }, { a: at(s1, t0), b: at(s1, t1) }, { a: at(s0, t1), b: at(s0, t0) }];
+        const front = ends.reduce((m, e) => ((e.a[0] + e.b[0]) / 2 > (m.a[0] + m.b[0]) / 2 ? e : m));      // the easternmost side
+        const len = Math.hypot(front.b[0] - front.a[0], front.b[1] - front.a[1]), ax = (front.b[0] - front.a[0]) / len, az = (front.b[1] - front.a[1]) / len;
+        const ox = az, oz = -ax;                                            // outward, to the right of a -> b
+        const mid = [(front.a[0] + front.b[0]) / 2, (front.a[1] + front.b[1]) / 2], depth = 6 * M;
+        // the facade may sit inside the bounding side: step out to the nearest wall along the outward normal
+        const P = (s, out) => [mid[0] + ax * s + ox * out, mid[1] + az * s + oz * out];
+        const y0 = base + floor * K, y1 = base + (roofTop - 2) * K;
+        for (let c = -2.5; c <= 2.5; c++) { const [cx, cz] = P(c * 3.2 * M, depth - .8 * M); cone(cx, cz, y0, y1, .75 * M, .65 * M, '#f7f1de', 10); }
+        const A = P(-9.5 * M, 0), B = P(9.5 * M, 0), C = P(9.5 * M, depth), D = P(-9.5 * M, depth);
+        prism('classic', [[A, B, C, D]], base, roofTop - 2, roofTop - .6, '#f7f1de');
+        const peak = base + (roofTop + 2.2) * K, ridgeA = P(0, 0), ridgeB = P(0, depth), lo = base + (roofTop - .6) * K;
         tri(plain, [[C[0], lo, C[1]], [D[0], lo, D[1]], [ridgeB[0], peak, ridgeB[1]]], linear('#f3ecd6'));
         quad(plain, [[D[0], lo, D[1]], [A[0], lo, A[1]], [ridgeA[0], peak, ridgeA[1]], [ridgeB[0], peak, ridgeB[1]]], linear('#7d8790'));
         quad(plain, [[B[0], lo, B[1]], [C[0], lo, C[1]], [ridgeB[0], peak, ridgeB[1]], [ridgeA[0], peak, ridgeA[1]]], linear('#7d8790'));
       }
     }
     if (site.id === 'radhus') {
-      // the clock on the east tower (harbour and courtyard sides), the mast on the west tower
+      // the clock on the east tower (harbour and courtyard faces), the mast on the west tower
+      const towers = parts.filter(q => q.min === 0 && q.max >= 55).sort((a, b) => centre(ringPts(a.rings[0]))[0] - centre(ringPts(b.rings[0]))[0]);
+      const east = towers[towers.length - 1], west = towers.length > 1 ? towers[0] : null;
       if (east) {
-        const pts = ccw(ringPts(east.rings[0])), y = base + (east.max - 8) * K;
+        const pts = ccw(ringPts(east.rings[0])), y = base + (east.max - 7) * K;
         for (let i = 0; i < pts.length; i++) {
-          const a = pts[i], b = pts[(i + 1) % pts.length], len = Math.hypot(b[0] - a[0], b[1] - a[1]);
-          const nx = (b[1] - a[1]) / len, nz = -(b[0] - a[0]) / len;
+          const a = pts[i], b2 = pts[(i + 1) % pts.length], len = Math.hypot(b2[0] - a[0], b2[1] - a[1]);
+          const nx = (b2[1] - a[1]) / len, nz = -(b2[0] - a[0]) / len;
           if (len < 8 * M || Math.abs(nz) < .7) continue;
-          const mx = (a[0] + b[0]) / 2, mz = (a[1] + b[1]) / 2;
-          disc(mx, y, mz, nx, nz, 3.6 * K, '#2c2a28');
-          disc(mx + nx * .05, y, mz + nz * .05, nx, nz, 3.1 * K, '#e9d9a6');
+          const mx = (a[0] + b2[0]) / 2, mz = (a[1] + b2[1]) / 2;
+          disc(mx + nx * .2, y, mz + nz * .2, nx, nz, 3.6 * K, '#2c2a28');
+          disc(mx + nx * .35, y, mz + nz * .35, nx, nz, 3.1 * K, '#e9d9a6');
         }
       }
       if (west) {
-        const pts = ringPts(west.rings[0]), c = centre(pts), y = base + west.max * K;
-        cone(c[0], c[1], y, y + 11 * K, .45 * M, .12 * M, '#3d3b39', 6);
+        const pts = ringPts(west.rings[0]), c = centre(pts), topW = Math.max(...parts.filter(q => Math.hypot(...centre(ringPts(q.rings[0])).map((v, k) => v - c[k])) < 6 * M).map(q => q.max));
+        cone(c[0], c[1], base + topW * K, base + (topW + 11) * K, .45 * M, .12 * M, '#3d3b39', 6);
       }
     }
-    if (site.id === 'domkirke') {
-      // steep roofs over the nave, choir and transepts, and the copper spire above the clock tower
-      for (const p of parts.filter(q => q.min === 0 && q.max <= 25 && q.max >= 12)) {
-        const pts = ringPts(p.rings[0]), { t0, t1 } = axes(pts);
-        roof('gabled', pts, base + p.max * K, (t1 - t0) / 2 * 1.15, '#4e5559');
-      }
-      if (tallest) {
-        const pts = ringPts(tallest.rings[0]), c = centre(pts), y = base + tallest.max * K;
-        cone(c[0], c[1], y, y + 16 * K, radius(pts, c) * .9, 0, '#7fae8c', 8);
-      }
-    }
-    if (site.id === 'stortinget') {
-      // the round halls' shallow domes
-      for (const p of parts) {
-        const pts = ringPts(p.rings[0]);
-        if (pts.length < 10) continue;
-        const c = centre(pts), r = radius(pts, c);
-        if (Math.abs(area(pts)) / (Math.PI * r * r) < .85) continue;
-        const y = base + p.max * K;
-        cone(c[0], c[1], y, y + r * .22, r, r * .55, '#a8916a', 16);
-        cone(c[0], c[1], y + r * .22, y + r * .34, r * .55, 0, '#a8916a', 16);
-      }
-    }
+    void FAMOUS;
   }
 
   // ---- one mesh per material ---------------------------------------------------------------------

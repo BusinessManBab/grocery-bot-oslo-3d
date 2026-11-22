@@ -16,11 +16,11 @@ import { MapControls } from 'three/addons/controls/MapControls.js';
 import { SVGLoader } from 'three/addons/loaders/SVGLoader.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { COLORS, HEADS, INK as TRUCK_INK, SHELL, EDGE, WOOD, LAMP, mix, light, face } from './looks.js';
-import { BASE, createBuildings } from './buildings3d.js?v=20';
-import { forestPath } from './forest.js?v=20';
-import { streamCity } from './city-stream.js?v=20';
-import { buildLandmarks, landmarkTop } from './landmarks.js?v=20';
-import { LIFT, M, RELIEF, UV_SCALE, createDecks, createFrame, readBuildings } from './world-build.js?v=20';
+import { BASE, createBuildings } from './buildings3d.js?v=21';
+import { forestPath } from './forest.js?v=21';
+import { streamCity } from './city-stream.js?v=21';
+import { buildLandmarks, landmarkTop } from './landmarks.js?v=22';
+import { LIFT, M, RELIEF, UV_SCALE, createDecks, createFrame, readBuildings } from './world-build.js?v=21';
 
 const PALETTE = {
   ground: '#f0e9d8', side: '#e2d6bb', base: '#cfc1a2', green: '#c9d8ac', water: '#86b8c5',
@@ -55,11 +55,11 @@ export async function createWorld3d(opts) {
   let picks = [];                           // this frame's clickable shops and order houses, in screen pixels
   const { OPEN, DELIVERED, PARKED, TRAIL, POP_TICKS, INK } = opts.constants;
   const [relief, heightBuffer, buildingBuffer, homeData, landmarkData] = await Promise.all([
-    grab('data/terrain.json?v=20', 'json'),
-    grab('data/terrain.bin?v=20', 'arrayBuffer'),
-    grab('data/buildings.bin?v=20', 'arrayBuffer'),
-    grab('data/homes.json?v=20', 'json'),
-    grab('data/landmarks.json?v=20', 'json').catch(() => null),
+    grab('data/terrain.json?v=21', 'json'),
+    grab('data/terrain.bin?v=21', 'arrayBuffer'),
+    grab('data/buildings.bin?v=21', 'arrayBuffer'),
+    grab('data/homes.json?v=21', 'json'),
+    grab('data/landmarks.json?v=21', 'json').catch(() => null),
   ]);
   const heights = new Uint16Array(heightBuffer);
   // Setup runs in short steps with a breath in between, so the page keeps answering (the 2D map
@@ -90,6 +90,8 @@ export async function createWorld3d(opts) {
   sun.shadow.normalBias = 0.6;
   scene.add(hemi, sun, sun.target);
   const SUN_DIR = new THREE.Vector3(-0.45, 1, 0.6).normalize();
+  // the light's own axes, for snapping the shadow camera to its texels
+  const lightRight = new THREE.Vector3(0, 1, 0).cross(SUN_DIR).normalize(), lightUp = SUN_DIR.clone().cross(lightRight).normalize();
 
   // ---- world extents: exactly the game map's bounds -----------------------------
   const [b0, b1, b2, b3] = town.bounds;
@@ -258,7 +260,7 @@ export async function createWorld3d(opts) {
     const footprint = [];
     for (let k = 0; k < home.ring.length; k += 2) footprint.push([wx(home.ring[k]), wy(home.ring[k + 1])]);
     const landmarkHeight = insideLandmark(footprint);
-    let { pts, top, style } = landmarkHeight === null ? cartoon.build(home.ring, Math.max(7, home.h), home.info || ['house'], 100000 + i, homeOut)
+    let { pts, top, style } = landmarkHeight === null ? cartoon.build(home.ring, Math.max(7, home.h), home.info || ['house'], 100000 + i, homeOut, { level: home.level, shared: home.shared })
       : { pts: footprint, top: 0, style: null };
     if (landmarkHeight !== null) top = heightAt(wx(home.p[0]), wy(home.p[1])) + landmarkHeight * M * LIFT;
     let cx = 0, cz = 0, r = 0;
@@ -704,21 +706,7 @@ export async function createWorld3d(opts) {
 
   function buildShop(player) {
     const store = game.meta.players[player.seat].store;
-    if (store?.footprint) {
-      const out = { walls: {}, roof: cartoon.bucket(), trim: cartoon.bucket(), plain: true };
-      const { top, pts, style } = cartoon.build(store.footprint.ring, Math.max(6, store.footprint.h), store.footprint.info || ['retail', '', '', ''], 900000 + player.seat, out);
-      const wall = new THREE.MeshLambertMaterial({ color: new THREE.Color(mix(player.colour, '#ffffff', .62)).multiply(wallTint), map: cartoon.textures[style], vertexColors: true, side: THREE.DoubleSide });
-      const roof = new THREE.MeshLambertMaterial({ color: player.colour, vertexColors: true, side: THREE.DoubleSide });
-      const geometry = cartoon.geometry(out.walls[style], out.roof, out.trim);
-      geometry.translate(-player.shop[0], -heightAt(player.shop[0], player.shop[1]), -player.shop[1]);
-      const mesh = new THREE.Mesh(geometry, [wall, roof, trimMat]);
-      mesh.castShadow = mesh.receiveShadow = true;
-      mesh.renderOrder = 30;
-      const group = new THREE.Group();
-      group.add(mesh);
-      const radius = Math.max(...pts.map(p => Math.hypot(p[0] - player.shop[0], p[1] - player.shop[1])));
-      return { group, mats: [wall, roof], actual: true, top: top - heightAt(player.shop[0], player.shop[1]), radius };
-    }
+    if (store?.footprint) return fittedShop(player, store.footprint);
     // 2D: 62 x 34 px body, 6 px roof band, 8 striped awning tiles, window left, door right, sign above.
     const mats = { frame: lit('#583a2d'), wall: lit('#fff3da'), paint: lit(player.colour), glass: lit('#b6d4d7'), door: lit('#65493a'),
       sign: new THREE.MeshLambertMaterial({ map: signTexture }), post: lit('#583a2d') };
@@ -747,6 +735,117 @@ export async function createWorld3d(opts) {
     for (const sx of [-1, 1]) g.add(box(1.6, 9, 1.6, mats.post, sx * 14, h + 9, front - 6));
     g.traverse(o => { if (o.isMesh) o.renderOrder = 30; });
     return { group: g, mats: Object.values(mats) };
+  }
+
+  // The real store building at its real size, dressed as the Grocery Bot shop of the 2D map and the
+  // other towns: cream walls with corner posts, the player's colour band and a dark roof edge, a
+  // striped awning, window and door on the side facing the shop's street, and the GROCERY BOT sign
+  // on posts above the front. Built in world space, then merged into one mesh per material.
+  function fittedShop(player, footprint) {
+    const sx = player.shop[0], sz = player.shop[1], ground = heightAt(sx, sz);
+    let pts = [];
+    for (let i = 0; i < footprint.ring.length; i += 2) {
+      const p = [wx(footprint.ring[i]), wy(footprint.ring[i + 1])], last = pts[pts.length - 1];
+      if (!last || Math.hypot(p[0] - last[0], p[1] - last[1]) > .3) pts.push(p);
+    }
+    if (pts.length > 3 && Math.hypot(pts[0][0] - pts[pts.length - 1][0], pts[0][1] - pts[pts.length - 1][1]) < .3) pts.pop();
+    if (THREE.ShapeUtils.isClockWise(pts.map(([x, z]) => new THREE.Vector2(x, z)))) pts.reverse();
+    const m = v => v * M, H = Math.max(6, footprint.h) * M * LIFT, foot = Math.min(...pts.map(([x, z]) => heightAt(x, z))) - 1.5 - ground;
+    const two = c => litBoth(c);                // real footprints wind either way: draw both sides
+    const mats = { frame: two('#583a2d'), wall: two('#fff3da'), paint: two(player.colour), glass: two('#b6d4d7'), door: two('#65493a'),
+      roof: two('#6b4e3d'), sign: new THREE.MeshLambertMaterial({ map: signTexture }) };
+    const parts = new Map();
+    const put = (mat, geo) => {                // untextured: position and normal only, so they merge
+      const g = geo.index ? geo.toNonIndexed() : geo;
+      for (const name of Object.keys(g.attributes)) if (name !== 'position' && name !== 'normal') g.deleteAttribute(name);
+      if (!parts.has(mat)) parts.set(mat, []);
+      parts.get(mat).push(g);
+    };
+    // polygon pushed out (d > 0) or in along its edge normals, mitred at the corners
+    const offset = (poly, d) => poly.map((p, i) => {
+      const a = poly[(i + poly.length - 1) % poly.length], b = poly[(i + 1) % poly.length];
+      const n1 = [p[1] - a[1], -(p[0] - a[0])], n2 = [b[1] - p[1], -(b[0] - p[0])];
+      const l1 = Math.hypot(...n1) || 1, l2 = Math.hypot(...n2) || 1, nx = n1[0] / l1 + n2[0] / l2, nz = n1[1] / l1 + n2[1] / l2;
+      const k = (nx * n1[0] / l1 + nz * n1[1] / l1) || 1;
+      return [p[0] + nx / k * d, p[1] + nz / k * d];
+    });
+    // walls and lid of a polygon prism between y0 and y1 (relative to the shop's ground)
+    const prism = (poly, y0, y1, mat) => {
+      const pos = [];
+      for (let i = 0; i < poly.length; i++) {
+        const a = poly[i], b = poly[(i + 1) % poly.length];
+        pos.push(a[0], y0, a[1], b[0], y0, b[1], b[0], y1, b[1], a[0], y0, a[1], b[0], y1, b[1], a[0], y1, a[1]);
+      }
+      for (const [i, j, k] of THREE.ShapeUtils.triangulateShape(poly.map(([x, z]) => new THREE.Vector2(x, z)), [])) pos.push(poly[i][0], y1, poly[i][1], poly[k][0], y1, poly[k][1], poly[j][0], y1, poly[j][1]);
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      geo.computeVertexNormals();
+      put(mat, geo);
+    };
+    // an axis-aligned box in the front's frame: s along the front, out = metres in front of the wall
+    const { s0, s1, t0, t1, at, dir } = (() => {
+      let best = 0, dx = 1, dz = 0;
+      for (let i = 0; i < pts.length; i++) { const a = pts[i], b = pts[(i + 1) % pts.length], l = Math.hypot(b[0] - a[0], b[1] - a[1]); if (l > best) { best = l; dx = (b[0] - a[0]) / l; dz = (b[1] - a[1]) / l; } }
+      let s0 = Infinity, s1 = -Infinity, t0 = Infinity, t1 = -Infinity;
+      for (const [x, z] of pts) { const s = x * dx + z * dz, t = -x * dz + z * dx; s0 = Math.min(s0, s); s1 = Math.max(s1, s); t0 = Math.min(t0, t); t1 = Math.max(t1, t); }
+      return { s0, s1, t0, t1, at: (s, t) => [dx * s - dz * t, dz * s + dx * t], dir: [dx, dz] };
+    })();
+    // the front: the side of the footprint's rectangle nearest the shop's street node
+    const sides = [
+      { a: at(s0, t0), b: at(s1, t0), out: [dir[1], -dir[0]] }, { a: at(s1, t1), b: at(s0, t1), out: [-dir[1], dir[0]] },
+      { a: at(s1, t0), b: at(s1, t1), out: dir }, { a: at(s0, t1), b: at(s0, t0), out: [-dir[0], -dir[1]] },
+    ];
+    const front = sides.reduce((best, side) => {
+      const d = Math.hypot((side.a[0] + side.b[0]) / 2 - sx, (side.a[1] + side.b[1]) / 2 - sz);
+      return !best || d < best.d ? { ...side, d } : best;
+    }, null);
+    const W = Math.hypot(front.b[0] - front.a[0], front.b[1] - front.a[1]), along = [(front.b[0] - front.a[0]) / W, (front.b[1] - front.a[1]) / W];
+    const F = (s, out) => [front.a[0] + along[0] * s + front.out[0] * out, front.a[1] + along[1] * s + front.out[1] * out];
+    const block = (s, w, out, d, y0, y1, mat, tilt = 0) => {
+      const geo = new THREE.BoxGeometry(w, y1 - y0, d);
+      if (tilt) geo.rotateX(tilt);
+      const [x, z] = F(s + w / 2, out);
+      geo.rotateY(Math.atan2(-along[1], along[0]));
+      geo.translate(x, (y0 + y1) / 2, z);
+      put(mat, geo);
+    };
+    const band = H * .82;
+    prism(offset(pts, m(.4)), foot, m(.6), mats.frame);                    // plinth
+    prism(pts, foot, band, mats.wall);                                      // cream walls
+    prism(offset(pts, m(.3)), band, H, mats.paint);                          // the colour band
+    prism(offset(pts, m(.55)), H, H + m(.45), mats.frame);                   // roof edge
+    prism(offset(pts, -m(1.2)), H, H + m(.6), mats.roof);                    // dark roof inside it
+    for (let i = 0; i < pts.length; i++) {                                  // corner posts where the wall turns
+      const a = pts[(i + pts.length - 1) % pts.length], p = pts[i], b = pts[(i + 1) % pts.length];
+      const turn = Math.abs(Math.atan2(b[1] - p[1], b[0] - p[0]) - Math.atan2(p[1] - a[1], p[0] - a[0]));
+      if (Math.min(turn, Math.PI * 2 - turn) < .5) continue;
+      const geo = new THREE.BoxGeometry(m(1.1), band - m(.6), m(1.1));
+      geo.translate(p[0], (m(.6) + band) / 2, p[1]);
+      put(mats.frame, geo);
+    }
+    // the shop front: striped awning over the ground floor, window left, door right
+    const storey = Math.min(band, m(4.6)), tiles = Math.max(6, Math.min(16, Math.round(W / m(3.2)))), tw = W / tiles, depth = Math.min(m(3.2), m(1) + W * .06);
+    for (let i = 0; i < tiles; i++) block(i * tw, tw + .02, depth * .45, depth, storey - m(.5), storey - m(.1), i % 2 ? mats.wall : mats.paint, -.5);
+    block(W * .1, W * .34, m(.18), m(.3), m(.8), Math.min(storey - m(.8), m(.8) + Math.min(H * .42, m(2.8))), mats.glass);
+    block(W * .62, Math.min(W * .2, m(2.6)), m(.18), m(.3), m(.6), Math.min(storey - m(.6), m(3.1)), mats.door);
+    // GROCERY BOT on two posts above the front
+    const sw = Math.max(m(8), Math.min(m(24), W * .6)), shg = sw / 2.94, sy = H + m(1.6), out = -m(1.5);
+    block((W - sw) / 2 + sw * .18, m(.5), out, m(.5), H, sy, mats.frame);
+    block((W + sw) / 2 - sw * .18 - m(.5), m(.5), out, m(.5), H, sy, mats.frame);
+    const signGeo = new THREE.BoxGeometry(sw, shg, m(.6));
+    const [cx, cz] = F(W / 2, out);
+    signGeo.rotateY(Math.atan2(-along[1], along[0]));
+    signGeo.translate(cx, sy + shg / 2, cz);
+    const g = new THREE.Group();
+    for (const [mat, geos] of parts) {
+      const mesh = new THREE.Mesh(mergeGeometries(geos, false), mat);
+      for (const geo of geos) geo.dispose();
+      g.add(mesh);
+    }
+    g.add(new THREE.Mesh(signGeo, [mats.paint, mats.paint, mats.paint, mats.paint, mats.sign, mats.sign]));
+    g.traverse(o => { if (o.isMesh) { o.position.set(-sx, 0, -sz); o.castShadow = o.receiveShadow = true; o.renderOrder = 30; } });
+    const radius = Math.max(...pts.map(([x, z]) => Math.hypot(x - sx, z - sz)));
+    return { group: g, mats: Object.values(mats), actual: true, top: sy + shg, radius };
   }
 
   // ---- trucks: the 2D truck art (looks.js) as a model --------------------------------
@@ -1159,6 +1258,10 @@ export async function createWorld3d(opts) {
     }
     camera.position.y = Math.max(camera.position.y, heightAt(camera.position.x, camera.position.z) + 12);
     const distance = camera.position.distanceTo(controls.target);
+    // The near plane follows the zoom: depth precision is spent where the city is, so surfaces a few
+    // centimetres apart (doors, neighbouring roofs) do not flicker when zoomed out.
+    const near = clamp(distance * .02, 2, 250);
+    if (Math.abs(near - camera.near) > camera.near * .1) { camera.near = near; camera.updateProjectionMatrix(); }
     // Atmospheric depth follows the current zoom, never a fixed small-map range.
     scene.fog.near = distance * 1.45;
     scene.fog.far = distance * 3;
@@ -1178,9 +1281,18 @@ export async function createWorld3d(opts) {
         (!resting && now - shadowAt > 500 && (shift > reachNow * .3 || zoomShift > shadowDistance * .3)) ||
         (cityChanged && now - shadowAt > 1000))) {
       cityChanged = false;
-      const reach = clamp(distance * 1.1, 260, 2600);
-      sun.target.position.copy(controls.target);
-      sun.position.copy(controls.target).addScaledVector(SUN_DIR, 3000);
+      // Stable shadows (no crawling or shimmering edges while moving): the covered area grows in
+      // fixed steps, the light is snapped to whole shadow-map texels, and the bias follows the
+      // texel size so surfaces never shadow themselves in stripes.
+      const reach = 2 ** (Math.round(Math.log2(clamp(distance * 1.1, 260, 2600)) * 3) / 3);
+      const texel = 2 * reach / sun.shadow.mapSize.x;
+      const along = (v, axis) => v.dot(axis);
+      const right = lightRight, up = lightUp, t = controls.target;
+      const r = Math.round(along(t, right) / texel) * texel, u = Math.round(along(t, up) / texel) * texel, f = along(t, SUN_DIR);
+      sun.target.position.copy(right).multiplyScalar(r).addScaledVector(up, u).addScaledVector(SUN_DIR, f);
+      sun.position.copy(sun.target.position).addScaledVector(SUN_DIR, 3000);
+      sun.shadow.normalBias = Math.max(.6, texel * 1.3);
+      sun.shadow.bias = -.0004;
       Object.assign(sun.shadow.camera, { left: -reach, right: reach, top: reach, bottom: -reach, near: 100, far: 6000 });
       sun.shadow.camera.updateProjectionMatrix();
       renderer.shadowMap.needsUpdate = true;

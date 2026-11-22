@@ -12,21 +12,23 @@ Playback opens at tick 120 with deliveries in motion; scrub back or use `?t=0` f
   **Full city** for the complete extent. **⌂** returns to the shop-layout view.
 - **12 AI competitors**, each with a separate shop, **60 trucks** and **240 shop robots**.
   Four Rush AI instances compete with eight reference AIs in a seeded, real-engine match.
-- **Twelve real, named grocery stores**, with at least **1.54 km separation**
-  and **8 km** between the furthest pair: Skøyen, Bygdøy, Frogner, Majorstuen,
-  Ullevål, Sagene, Bjerke, Helsfyr, Vålerenga, Ekeberg, Bjørvika and Grünerløkka.
-- **398 delivery homes**: 160 real Kartverket addresses plus 238 explicitly labelled
+- **Every player shop is a real MENY store** (OpenStreetMap, NorgesGruppen's MENY chain): the
+  twelve MENY stores on the map that have delivery homes around them. The other four MENY on the
+  map (Bryn, Manglerud, Vollebekk, Gressbanen) lie where no delivery homes are; other NorgesGruppen
+  stores (KIWI, Joker, SPAR, Nærbutikken) would only be used if MENY could not fill the seats.
+  Each shop is drawn as the Grocery Bot shop of the 2D map on its real store building.
+- **397 delivery homes**: 160 real Kartverket addresses plus 237 explicitly labelled
   delivery-building points on real footprints near the shops. These new building
   points are not presented as verified postal addresses. OpenStreetMap streets, parks and water,
   and Mapzen Terrarium elevation. Akerselva flows toward the fjord; the fjord is still.
-- Real building footprints, with 395/398 delivery homes matched to mapped buildings.
+- Real building footprints, with nearly all 397 delivery homes matched to mapped buildings.
   Background wall jogs under approximately 1.5–2.5 m are simplified once, when the
   buildings are baked (`tools/bake_buildings.mjs`).
   **Every building's complete walls and roof are built and stay resident**: they stream in
   nearest-first while the page opens and are all in place within seconds. No distance-based
   wall hiding, level of detail or geometry swapping happens while moving the camera.
-  The twelve shop buildings use their mapped footprints with player-coloured roofs,
-  not oversized generic stores. There are **54,326 background buildings** plus the 398
+  The twelve shop buildings keep their real size and are dressed as the Grocery Bot shop
+  (cream walls, player-colour band, striped awning, sign). There are about **54,200 background buildings** plus the
   delivery homes. Real elevation now spans **0–377 m**, on a **711 × 668** height grid.
 - **Oslo's landmarks, true to life** (`src/landmarks.js`, data from `tools/bake_landmarks.py`).
   The plain building data missed or flattened Oslo's famous buildings (OpenStreetMap maps them
@@ -113,26 +115,26 @@ replay for both; "4× CPU" is Chrome's CPU throttling, "phone" a 390 × 844 @3×
 
 The 3D view itself is checked with `tools/browser_check.cjs` and `tools/full_building_probe.cjs`.
 
-## Actual grocery locations
+## Player shops: MENY stores
 
-POI names, coordinates and footprints come from the pinned OpenFreeMap/OpenMapTiles
-OpenStreetMap snapshot. They are mapped store locations, not a live business directory.
-The exact POI identifiers and source URL are preserved in `data/layout.json`.
+Store names, positions and buildings come from OpenStreetMap (Overpass API, cached in
+`.cache/overpass/`; buildings the scenery snapshot lacks are taken from OSM too). They are mapped
+store locations, not a live business directory. `tools/use_real_shops.py` picks them.
 
-| District | Grocery store |
+| Seat area | MENY store |
 |---|---|
-| Skøyen | Bunnpris Skøyen Atrium |
-| Bygdøy | Matkroken Huk |
-| Frogner | Extra Gimle |
-| Majorstuen | Kiwi Ringhuset |
-| Ullevål | Coop Mega Ullevål |
-| Sagene | Rema 1000 Mogata |
-| Bjerke | Kiwi Bjerke |
-| Helsfyr / Ulven | Kiwi Ulven |
-| Vålerenga / Etterstad | Rema 1000 Etterstad |
-| Ekeberg / Holtet | Joker Holtet |
-| Bjørvika | Joker Barcode |
-| Grünerløkka / Rodeløkka | Kiwi Rodeløkka |
+| Skøyen | Meny Skøyen |
+| Frogner | Meny Frogner |
+| Vika | Meny Vika |
+| Colosseum | Meny Colosseum |
+| Bjølsen | Meny Bjølsen |
+| Ringnes park | Meny Ringnes park |
+| Løren | Meny Løren |
+| Lillo Gård | Meny Lillo Gård |
+| Grønland | Meny Grønland |
+| Bjørvika | Meny Bjørvika |
+| Oslo City | Meny Oslo City |
+| Bogstadveien | Meny Bogstadveien |
 
 ## Run locally
 

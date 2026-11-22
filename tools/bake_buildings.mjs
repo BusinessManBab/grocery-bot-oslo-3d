@@ -12,7 +12,11 @@
 //  - leaves out the footprints that data/landmarks.json's famous buildings replace
 //    (tools/bake_landmarks.py) and anything standing mostly on the water the map draws
 //    (houseboats, kiosks on piers, boathouses: their decks and hulls are not drawn)
-// The delivery homes go to data/homes.json unchanged (they are never simplified).
+//  - against flicker (two surfaces in the same place): leaves out footprints that duplicate a
+//    delivery home, gives touching or overlapping buildings different small height levels (so no
+//    two neighbouring roofs share a plane) and flags walls shared with a neighbour (no parapet or
+//    door there: they would coincide with the neighbour's)
+// The delivery homes go to data/homes.json (never simplified), with their level and shared walls.
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -93,19 +97,53 @@ function wetShare(ring) {
 const landmarks = fs.existsSync(path.join(ROOT, 'data', 'landmarks.json')) ? JSON.parse(fs.readFileSync(path.join(ROOT, 'data', 'landmarks.json'), 'utf8')) : { sites: [] };
 const replaced = new Set(landmarks.sites.flatMap(site => site.replaces || []));
 
+// ---- footprint geometry helpers (1e5-degree ints; distances in those units, ~1 m each) -------
+const sq = Math.cos((b1 + b3) / 2 / 1e5 * Math.PI / 180);
+const toM = ([x, y]) => [x * sq, y];                    // metric-ish plane for distances
+function inside([x, y], ring) {
+  let c = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [ax, ay] = ring[i], [bx, by] = ring[j];
+    if ((ay > y) !== (by > y) && x < (bx - ax) * (y - ay) / (by - ay) + ax) c = !c;
+  }
+  return c;
+}
+function segDist([px, py], [ax, ay], [bx, by]) {
+  const dx = bx - ax, dy = by - ay, t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy || 1)));
+  return Math.hypot(px - ax - t * dx, py - ay - t * dy);
+}
+const ringDist = (p, ring) => { let d = Infinity; for (let i = 0; i < ring.length; i++) d = Math.min(d, segDist(p, ring[i], ring[(i + 1) % ring.length])); return d; };
+function samples(ring) {                                 // centre plus points 30% and 70% out to each corner
+  let cx = 0, cy = 0;
+  for (const [x, y] of ring) { cx += x; cy += y; }
+  cx /= ring.length; cy /= ring.length;
+  return [[cx, cy], ...ring.flatMap(([x, y]) => [[cx + (x - cx) * .3, cy + (y - cy) * .3], [cx + (x - cx) * .7, cy + (y - cy) * .7]])];
+}
+const share = (a, b) => { const s = samples(a); return s.filter(p => inside(p, b)).length / s.length; };
+const areaOf = ring => { let a = 0; for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) a += (ring[j][0] - ring[i][0]) * (ring[j][1] + ring[i][1]); return Math.abs(a / 2); };
+const homeRings = extra.homes.map(h => { const r = []; for (let i = 0; i < h.ring.length; i += 2) r.push(toM([h.ring[i], h.ring[i + 1]])); return r; });
+const homeBoxes = homeRings.map(r => [Math.min(...r.map(p => p[0])), Math.min(...r.map(p => p[1])), Math.max(...r.map(p => p[0])), Math.max(...r.map(p => p[1]))]);
+
 const stores = new Set(game.meta.players.filter(p => p.store?.footprint).map(p => p.store.footprint.ring.join(',')));
 const table = list => { const index = new Map(list.map((v, i) => [v, i])); return v => { if (!index.has(v)) { index.set(v, list.length); list.push(v); } return index.get(v); }; };
 const types = [], roofs = [''], colours = [''];
 const typeOf = table(types), roofOf = table(roofs), colourOf = table(colours);
 
 const items = [];
-let dropped = 0, wet = 0, landmarked = 0;
+let dropped = 0, wet = 0, landmarked = 0, duplicates = 0;
 extra.buildings.forEach((b, id) => {
   if (stores.has(b.slice(1).join(','))) { dropped++; return; }
   if (replaced.has(id)) { landmarked++; return; }
   const raw = [];
   for (let i = 1; i < b.length; i += 2) raw.push([b[i], b[i + 1]]);
   if (wetShare(raw) >= .5) { wet++; return; }
+  // a background footprint in the same place as a delivery home: the home is drawn, not both
+  const m = raw.map(toM), box = [Math.min(...m.map(p => p[0])), Math.min(...m.map(p => p[1])), Math.max(...m.map(p => p[0])), Math.max(...m.map(p => p[1]))];
+  for (let h = 0; h < homeRings.length; h++) {
+    const hb = homeBoxes[h];
+    if (hb[0] > box[2] || hb[2] < box[0] || hb[1] > box[3] || hb[3] < box[1]) continue;
+    if (share(m, homeRings[h]) >= .5 || (share(homeRings[h], m) >= .8 && areaOf(m) < 3 * areaOf(homeRings[h]))) { duplicates++; return; }
+  }
   const ring = outline(b.slice(1));
   if (ring.length < 3) { dropped++; return; }
   let cx = 0, cy = 0;
@@ -120,6 +158,49 @@ extra.buildings.forEach((b, id) => {
 if (extra.buildings.length > 65535) throw new Error('ids no longer fit in uint16');
 if (types.length > 255 || roofs.length > 255 || colours.length > 255) throw new Error('tag tables no longer fit in uint8');
 items.sort((p, q) => p.chunk - q.chunk || p.id - q.id);
+
+// ---- neighbours: touching (walls within 0.6 units) or overlapping footprints, homes included ----
+const nodes = [...items.map(it => it.ring.map(toM)), ...homeRings];
+const CELL = 60, grid = new Map(), boxes = nodes.map(r => [Math.min(...r.map(p => p[0])), Math.min(...r.map(p => p[1])), Math.max(...r.map(p => p[0])), Math.max(...r.map(p => p[1]))]);
+boxes.forEach((b, i) => {
+  for (let gx = Math.floor(b[0] / CELL); gx <= Math.floor(b[2] / CELL); gx++)
+    for (let gy = Math.floor(b[1] / CELL); gy <= Math.floor(b[3] / CELL); gy++) {
+      const k = gx * 1e6 + gy;
+      if (!grid.has(k)) grid.set(k, []);
+      grid.get(k).push(i);
+    }
+});
+const TOUCH = .6, neighbours = nodes.map(() => []), sharedEdge = nodes.map(r => new Uint8Array(r.length));
+for (let i = 0; i < nodes.length; i++) {
+  const b = boxes[i], seen = new Set();
+  for (let gx = Math.floor((b[0] - TOUCH) / CELL); gx <= Math.floor((b[2] + TOUCH) / CELL); gx++)
+    for (let gy = Math.floor((b[1] - TOUCH) / CELL); gy <= Math.floor((b[3] + TOUCH) / CELL); gy++)
+      for (const j of grid.get(gx * 1e6 + gy) || []) {
+        if (j <= i || seen.has(j)) continue;
+        seen.add(j);
+        const c = boxes[j];
+        if (c[0] > b[2] + TOUCH || c[2] < b[0] - TOUCH || c[1] > b[3] + TOUCH || c[3] < b[1] - TOUCH) continue;
+        const A = nodes[i], B = nodes[j];
+        const near = A.some(p => inside(p, B) || ringDist(p, B) < TOUCH) || B.some(p => inside(p, A) || ringDist(p, A) < TOUCH);
+        if (!near) continue;
+        neighbours[i].push(j); neighbours[j].push(i);
+        // walls lying along the other's wall (three points on each edge within the touch distance)
+        const mark = (R, S, flags) => R.forEach((p, e) => {
+          const q = R[(e + 1) % R.length], on = t => ringDist([p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t], S) < TOUCH;
+          if (on(.2) && on(.5) && on(.8)) flags[e] = 1;
+        });
+        mark(A, B, sharedEdge[i]); mark(B, A, sharedEdge[j]);
+      }
+}
+// greedy colouring: neighbours get different levels (0..7), each level 6 cm higher
+const level = new Uint8Array(nodes.length);
+for (let i = 0; i < nodes.length; i++) {
+  const used = new Set(neighbours[i].filter(j => j < i).map(j => level[j]));
+  let l = 0;
+  while (used.has(l) && l < 7) l++;
+  level[i] = l;
+}
+const homeLevel = Array.from(level.subarray(items.length)), homeShared = sharedEdge.slice(items.length);
 
 const count = items.length, points = items.reduce((n, it) => n + it.ring.length, 0);
 const chunks = Array.from({ length: GRID * GRID }, () => [0, 0]);
@@ -143,9 +224,11 @@ add('type', 'Uint8', count);
 add('roof', 'Uint8', count);
 add('wall', 'Uint8', count);
 add('roofColour', 'Uint8', count);
+add('level', 'Uint8', count);
+add('edge', 'Uint8', points);
 const body = new ArrayBuffer(Math.ceil(offset / 4) * 4);
 const view = Object.fromEntries(layout.map(l => [l.name, new globalThis[l.type + 'Array'](body, l.offset, l.length)]));
-let d = 0;
+let d = 0, e = 0;
 items.forEach((it, i) => {
   view.first[i * 2] = it.ring[0][0];
   view.first[i * 2 + 1] = it.ring[0][1];
@@ -161,6 +244,8 @@ items.forEach((it, i) => {
   view.roof[i] = it.roof;
   view.wall[i] = it.wall;
   view.roofColour[i] = it.roofColour;
+  view.level[i] = level[i];
+  for (let k = 0; k < it.ring.length; k++) view.edge[e++] = sharedEdge[i][k];
 });
 
 // fingerprint of the inputs, so tools/check_preview.py can tell when the bake is stale
@@ -173,9 +258,12 @@ json = Buffer.concat([json, Buffer.alloc((4 - json.length % 4) % 4, 0x20)]);
 const lead = Buffer.alloc(4);
 lead.writeUInt32LE(json.length);
 fs.writeFileSync(path.join(ROOT, 'data', 'buildings.bin'), Buffer.concat([lead, json, Buffer.from(body)]));
-fs.writeFileSync(path.join(ROOT, 'data', 'homes.json'), JSON.stringify({ attribution: extra.attribution, homes: extra.homes }));
+fs.writeFileSync(path.join(ROOT, 'data', 'homes.json'), JSON.stringify({ attribution: extra.attribution,
+  homes: extra.homes.map((h, i) => ({ ...h, level: homeLevel[i], shared: Array.from(homeShared[i]) })) }));
 
 const rawPoints = extra.buildings.reduce((n, b) => n + (b.length - 1) / 2, 0);
-console.log(`buildings.bin: ${count} buildings (${dropped} store/degenerate, ${landmarked} replaced by landmarks, ${wet} on water left out), ` +
+console.log(`neighbours: ${neighbours.reduce((n, l) => n + l.length, 0) / 2} touching/overlapping pairs, ${sharedEdge.reduce((n, f) => n + f.reduce((a, b) => a + b, 0), 0)} shared walls, ` +
+  `levels used ${Math.max(...level) + 1}`);
+console.log(`buildings.bin: ${count} buildings (${dropped} store/degenerate, ${landmarked} replaced by landmarks, ${wet} on water, ${duplicates} duplicating a home left out), ` +
   `${points} corners (${rawPoints} before simplifying), ${(4 + json.length + body.byteLength) / 1e6} MB; ` +
   `chunk sizes ${Math.min(...chunks.map(c => c[1]))}-${Math.max(...chunks.map(c => c[1]))}; homes.json: ${extra.homes.length} homes`);

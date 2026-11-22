@@ -181,11 +181,20 @@ export function createBuilder({ heightAt, M, LIFT }) {
    * metres: OSM height; info: [type, roof:shape, building:colour, roof:colour]; id: a stable number.
    * Walls carry their linear colour (the wall material multiplies by 1 / BASE so plain wall shows
    * the true colour); `plain` buildings get white walls and roofs, coloured by their materials.
+   * extra: { level: 0..7 (each 6 cm higher, so neighbouring roofs never share a plane),
+   *          shared: per corner, 1 when the wall to the next corner lies along a neighbour's wall }
    * Returns { pts, top, style } (top = highest point, for pins and labels).
    */
-  function build(pts, metres, info, id, out) {
-    if (area(pts) < 0) pts = pts.slice().reverse();
+  function build(pts, metres, info, id, out, extra = {}) {
+    let shared = extra.shared || null;
+    if (area(pts) < 0) {
+      const n = pts.length;
+      pts = pts.slice().reverse();
+      if (shared) shared = pts.map((_, k) => shared[(2 * n - 2 - k) % n]);   // wall k now runs the other way
+    }
     if (pts.length < 3) return { pts, top: 0, style: 'house' };
+    const isShared = i => !!(shared && shared[i]);
+    metres += (extra.level || 0) * .06;
     const [type = 'yes', roofTag = '', wallTag = '', roofColTag = ''] = info || [];
     const ar = Math.abs(area(pts)), areaM = ar / (M * M), h0 = metres;
     const style = STYLE_OF[type] || (areaM < 220 && h0 <= 9 ? 'house' : h0 > 10 ? 'apt' : areaM > 900 ? 'ind' : 'com');
@@ -240,7 +249,10 @@ export function createBuilder({ heightAt, M, LIFT }) {
       quad(roofB, [E3, E4, R1, R2], rc);
       if (hipped) { tri(roofB, [E4, E1, R1], rc); tri(roofB, [E2, E3, R2], rc); }
       else {                                                      // gable ends: wall triangles under the roof
+        // not where the end wall is shared with a neighbour: its own gable would sit in the same plane
+        const endShared = end => pts.some((a, i) => { const b = pts[(i + 1) % pts.length]; return isShared(i) && Math.abs(a[0] * dx + a[1] * dz - end) < .6 && Math.abs(b[0] * dx + b[1] * dz - end) < .6; });
         for (const s of [s0, s1]) {
+          if (endShared(s)) continue;
           const A = at(s, t0, top), B = at(s, t1, top), C = at(s, tm, ridge - .1 * M);
           const vA = (top - lo) / STOREY, vC = (ridge - lo) / STOREY;
           tri(walls, [A, B, C], wc, [[0, vA], [(t1 - t0) / bay, vA], [(t1 - t0) / bay / 2, vC]]);
@@ -269,7 +281,11 @@ export function createBuilder({ heightAt, M, LIFT }) {
       // flat roof: cap, a parapet rim and (on big blocks) a rooftop box
       polygon(roofB, pts, top, triangulate(pts), rc);
       const pc = linear(hexOf(scale(linear(wallHex), .86))), ph = top + .55 * M;
-      if (!tiny) for (let i = 0; i < pts.length; i++) { const a = pts[i], b = pts[(i + 1) % pts.length]; quad(trim, [[a[0], top, a[1]], [b[0], top, b[1]], [b[0], ph, b[1]], [a[0], ph, a[1]]], pc); }
+      if (!tiny) for (let i = 0; i < pts.length; i++) {
+        if (isShared(i)) continue;                                // the neighbour's wall or parapet is here
+        const a = pts[i], b = pts[(i + 1) % pts.length];
+        quad(trim, [[a[0], top, a[1]], [b[0], top, b[1]], [b[0], ph, b[1]], [a[0], ph, a[1]]], pc);
+      }
       if (areaM > 380) {
         let cx = 0, cz = 0;
         for (const p of pts) { cx += p[0]; cz += p[1]; }
@@ -282,8 +298,9 @@ export function createBuilder({ heightAt, M, LIFT }) {
 
     // a front door on houses, in the middle of the longest wall, facing out
     if (!tiny && (style === 'house' || style === 'church' || (style === 'apt' && r % 2 === 0))) {
-      let k = 0, len = 0;
-      for (let i = 0; i < pts.length; i++) { const a = pts[i], b = pts[(i + 1) % pts.length], l = Math.hypot(b[0] - a[0], b[1] - a[1]); if (l > len) { len = l; k = i; } }
+      let k = -1, len = 0;
+      for (let i = 0; i < pts.length; i++) { if (isShared(i)) continue; const a = pts[i], b = pts[(i + 1) % pts.length], l = Math.hypot(b[0] - a[0], b[1] - a[1]); if (l > len) { len = l; k = i; } }
+      if (k < 0) return { pts, top: peak, style };
       const a = pts[k], b = pts[(k + 1) % pts.length], mx = (a[0] + b[0]) / 2, mz = (a[1] + b[1]) / 2;
       const ex = (b[0] - a[0]) / (len || 1), ez = (b[1] - a[1]) / (len || 1);
       let cx = 0, cz = 0;
@@ -291,7 +308,7 @@ export function createBuilder({ heightAt, M, LIFT }) {
       cx /= pts.length; cz /= pts.length;
       let ox = -ez, oz = ex;
       if (ox * (mx - cx) + oz * (mz - cz) < 0) { ox = -ox; oz = -oz; }
-      const g = heightAt(mx, mz), w = .55 * M, off = .08 * M, dh = 2.2 * M * LIFT * .85;
+      const g = heightAt(mx, mz), w = .55 * M, off = .25 * M, dh = 2.2 * M * LIFT * .85;   // clear of the wall: no flicker
       const p = (s, y) => [mx + ex * s + ox * off, y, mz + ez * s + oz * off];
       quad(trim, [p(-w, g), p(w, g), p(w, g + dh), p(-w, g + dh)], linear(pick(DOORS, r >>> 3)));
       quad(trim, [p(-w - .25 * M, g + dh), p(w + .25 * M, g + dh), p(w + .25 * M, g + dh + .25 * M), p(-w - .25 * M, g + dh + .25 * M)], WHITE);
@@ -303,12 +320,13 @@ export function createBuilder({ heightAt, M, LIFT }) {
 }
 
 /** Footprint ring [lon, lat, lon, lat, ...] (1e-5 degree ints) -> [[x, z], ...] without repeated corners. */
-export function ringPoints(ring, wx, wy) {
-  const pts = [];
+export function ringPoints(ring, wx, wy, flags = null) {
+  const pts = [], kept = [];
   for (let i = 0; i < ring.length; i += 2) {
     const x = wx(ring[i]), z = wy(ring[i + 1]), last = pts[pts.length - 1];
-    if (!last || last[0] !== x || last[1] !== z) pts.push([x, z]);
+    if (!last || last[0] !== x || last[1] !== z) { pts.push([x, z]); kept.push(i / 2); }
   }
-  while (pts.length > 3 && pts[0][0] === pts[pts.length - 1][0] && pts[0][1] === pts[pts.length - 1][1]) pts.pop();
+  while (pts.length > 3 && pts[0][0] === pts[pts.length - 1][0] && pts[0][1] === pts[pts.length - 1][1]) { pts.pop(); kept.pop(); }
+  if (flags) pts.shared = kept.map(k => flags[k] || 0);          // per-corner flags follow the kept corners
   return pts;
 }

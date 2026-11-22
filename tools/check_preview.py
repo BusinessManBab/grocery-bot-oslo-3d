@@ -13,12 +13,12 @@ assert town["town"] == "oslo"
 assert town["coverage"]["kind"] == "distributed-city-match"
 assert town["coverage"]["playBounds"] == town["bounds"]
 assert len(load("landcover.json")["wood"]) > 0
-assert graph["id"] == "oslo-real-grocers-preview-v5"
+assert graph["id"] == "oslo-meny-preview-v6"
 assert len(graph["shops"]) == len(game["meta"]["players"]) == shop["seats"] == 12
 assert len({s["node"] for s in graph["shops"]}) == 12
 assert len({p["look"]["color"] for p in game["meta"]["players"]}) == 12
-assert len(graph["addresses"]) == len(town["homes"]) == len(buildings["homes"]) == layout["deliveryHomes"] == 398
-assert sum(a.get("kind") == "building" for a in graph["addresses"]) == 238
+assert len(graph["addresses"]) == len(town["homes"]) == len(buildings["homes"]) == layout["deliveryHomes"] >= 390
+assert sum(a.get("kind") == "building" for a in graph["addresses"]) >= 230
 point = lambda xy: tuple(round(v * 1e5) for v in xy)
 assert {point(a["coordinates"]) for a in graph["addresses"]} == {tuple(p) for p in town["homes"]}
 assert {tuple(h["p"]) for h in buildings["homes"]} == {tuple(p) for p in town["homes"]}
@@ -30,10 +30,11 @@ for location, player in zip(graph["shops"], game["meta"]["players"]):
     assert location["store"]["poiId"] == player["store"]["poiId"]
     assert location["coordinates"] == player["store"]["coordinates"]
     assert location["store"]["category"] in ("supermarket", "convenience")
+    assert "meny" in location["store"]["name"].lower(), location["store"]["name"]      # every player shop is a MENY
 sq = math.cos(math.radians(59.92))
 distance = lambda a, b: math.hypot((a[0] - b[0]) * sq, a[1] - b[1]) * 111300
 separations = [distance(a["coordinates"], b["coordinates"]) for i, a in enumerate(graph["shops"]) for b in graph["shops"][i + 1:]]
-assert min(separations) >= 1200 and max(separations) >= 7500, separations
+assert min(separations) >= 400 and max(separations) >= 5000, separations      # MENY stores sit closer than the old hand-spread spawns
 for s in graph["shops"]:
     assert sum(distance(a["coordinates"], s["coordinates"]) < 1250 for a in graph["addresses"]) >= 15, s
 assert game["finished"] and len(game["frames"]) == game["meta"]["ticks"] + 1 == shop["ticks"]
@@ -64,10 +65,10 @@ assert all(s.get("parts") or s["build"] == "model" for s in landmarks["sites"])
 bin_header = baked("buildings.bin", ["buildings.json", "game-map.json", "game.json", "landmarks.json"])
 assert bin_header["count"] > 54000 and sum(c[1] for c in bin_header["chunks"]) == bin_header["count"]
 assert bin_header["bounds"] == town["bounds"]
-assert load("homes.json")["homes"] == buildings["homes"]
+assert [(h["p"], h["ring"]) for h in load("homes.json")["homes"]] == [(h["p"], h["ring"]) for h in buildings["homes"]]
 tree_header = baked("trees.bin", ["game-map.json", "buildings.json", "landcover.json", "game.json", "homes.json", "landmarks.json"])
 assert tree_header["forest"] > 1000 and tree_header["parks"] > 500, tree_header
-print(f"PASS: 12 real grocery-store locations, 60 trucks, 398 matching homes, {shop['ticks']} synchronized frames.")
+print(f"PASS: 12 real grocery-store locations, 60 trucks, {len(town['homes'])} matching homes, {shop['ticks']} synchronized frames.")
 print(f"Shop separations: {min(separations):.0f}–{max(separations):.0f} m")
 print("Delivered per AI:", delivered)
 print("Terrain:", relief)

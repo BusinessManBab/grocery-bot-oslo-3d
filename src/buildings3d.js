@@ -5,7 +5,7 @@
 //    (no geometry per window); the wall colour comes from vertex colours, and wall materials
 //    multiply by 1 / BASE so plain wall shows the true colour
 import * as THREE from 'three';
-import { BASE, Bucket, createBuilder, ringPoints } from './building-geometry.js?v=20';
+import { BASE, Bucket, createBuilder, ringPoints } from './building-geometry.js?v=21';
 
 export { BASE };
 
@@ -61,7 +61,10 @@ export function createBuildings({ heightAt, wx, wy, M, LIFT }) {
   const builder = createBuilder({ heightAt, M, LIFT });
 
   /** ring: flat 1e5-degree ints. Returns { pts: [[x, z], ...], top, style }. */
-  const build = (ring, metres, info, id, out) => builder.build(ringPoints(ring, wx, wy), metres, info, id, out);
+  const build = (ring, metres, info, id, out, extra = {}) => {
+    const pts = ringPoints(ring, wx, wy, extra.shared);
+    return builder.build(pts, metres, info, id, out, { level: extra.level, shared: pts.shared });
+  };
   const bucket = () => new Bucket(true);
 
   // buckets -> one indexed geometry; with several buckets, one draw group per bucket (per-part materials)

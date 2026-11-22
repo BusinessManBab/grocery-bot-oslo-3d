@@ -3,7 +3,7 @@
 // arrays and is added to the scene at once, so the city fills in around you within moments while
 // the page stays responsive. Browsers without module workers build on the page instead, one job
 // at a time between frames.
-const WORKER_URL = new URL('./world-worker.js?v=20', import.meta.url);
+const WORKER_URL = new URL('./world-worker.js?v=21', import.meta.url);
 
 /**
  * @param jobs [{ type: 'roads', roads, bridges } | { type: 'chunk', chunk }] in the order wanted
@@ -31,7 +31,7 @@ export function streamCity({ jobs, terrain, buildings, onResult }) {
   // on the page: one job, then let a frame through
   async function onPage() {
     if (fallback) return;
-    fallback = import('./world-build.js?v=20').then(async ({ buildChunk, buildRoads, createFrame, readBuildings }) => {
+    fallback = import('./world-build.js?v=21').then(async ({ buildChunk, buildRoads, createFrame, readBuildings }) => {
       const frame = createFrame(terrain), data = readBuildings(buildings);
       for (const w of workers) { w.worker.terminate(); if (w.job) queue.unshift(w.job); }
       workers.length = 0;

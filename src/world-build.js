@@ -8,7 +8,7 @@
 //  - indices: uint16 when the mesh has fewer than 65536 vertices, else uint32
 // That is 20 bytes per building vertex instead of 44, and indexed faces need 4 vertices per
 // wall instead of 6.
-import { Bucket, STYLES, createBuilder } from './building-geometry.js?v=20';
+import { Bucket, STYLES, createBuilder } from './building-geometry.js?v=21';
 
 export const M = 1 / 1.113;              // world units per metre (one unit is 1e-5 degree of latitude)
 export const LIFT = 1.3;                 // buildings a little taller than life so the town reads from above
@@ -42,9 +42,9 @@ export function readBuildings(buffer) {
   const base = 4 + size, arrays = {};
   for (const { name, type, length, offset } of header.layout) arrays[name] = new globalThis[type + 'Array'](buffer, base + offset, length);
   // where each building's deltas start
-  const start = new Uint32Array(header.count);
-  for (let i = 0, d = 0; i < header.count; i++) { start[i] = d; d += (arrays.points[i] - 1) * 2; }
-  return { header, arrays, start };
+  const start = new Uint32Array(header.count), edgeStart = new Uint32Array(header.count);
+  for (let i = 0, d = 0, e = 0; i < header.count; i++) { start[i] = d; d += (arrays.points[i] - 1) * 2; edgeStart[i] = e; e += arrays.points[i]; }
+  return { header, arrays, start, edgeStart };
 }
 
 /** Bucket -> transferable, quantized mesh data (see the header comment). */
@@ -92,7 +92,7 @@ function pack(bucket) {
 
 /** All buildings of one chunk -> one mesh per facade style plus one for roofs and trim. */
 export function buildChunk(frame, data, chunk) {
-  const { header, arrays, start } = data;
+  const { header, arrays, start } = data, edgeStart = data.edgeStart;
   const builder = createBuilder({ heightAt: frame.heightAt, M, LIFT });
   const out = { walls: {}, trim: new Bucket(false, 1 << 14) };
   const [first, count] = header.chunks[chunk];
@@ -105,7 +105,8 @@ export function buildChunk(frame, data, chunk) {
       pts.push([frame.wx(lon), frame.wy(lat)]);
     }
     const info = [header.types[arrays.type[i]], header.roofs[arrays.roof[i]], header.colours[arrays.wall[i]], header.colours[arrays.roofColour[i]]];
-    builder.build(pts, arrays.height[i], info, arrays.id[i], out);
+    const extra = arrays.level ? { level: arrays.level[i], shared: arrays.edge.subarray(edgeStart[i], edgeStart[i] + n) } : {};
+    builder.build(pts, arrays.height[i], info, arrays.id[i], out, extra);
   }
   const meshes = [], transfer = [];
   for (const style of STYLES) {
