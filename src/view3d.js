@@ -49,19 +49,30 @@ export function pickQuality() {
 export async function createWorld3d(opts) {
   const { host, overlay: ctx, view, town, game, play, wx, wy, truckAt, labels } = opts;
   const grab = opts.grab || ((url, kind) => fetch(url).then(res => { if (!res.ok) throw new Error(`${url}: ${res.status}`); return res[kind](); }));
-  const forest = opts.trees?.forest || opts.forest || [];
-  const parkSpots = opts.trees?.parks || [];     // both cleared of houses and landmarks by tools/tree_clearance.mjs
+  let forest = opts.trees?.forest || opts.forest || [];
+  let parkSpots = opts.trees?.parks || [];     // both cleared of houses and landmarks by tools/tree_clearance.mjs
   const low = (opts.quality || pickQuality()) === 'low';
   let picks = [];                           // this frame's clickable shops and order houses, in screen pixels
   const { OPEN, DELIVERED, PARKED, TRAIL, POP_TICKS, INK } = opts.constants;
-  const [relief, heightBuffer, buildingBuffer, homeData, landmarkData] = await Promise.all([
+  const [relief, heightBuffer, buildingBuffer, homeData, landmarkData, shopPlacement] = await Promise.all([
     grab('data/terrain.json?v=21', 'json'),
     grab('data/terrain.bin?v=21', 'arrayBuffer'),
     grab('data/buildings.bin?v=24', 'arrayBuffer'),
     grab('data/homes.json?v=21', 'json'),
     grab('data/landmarks.json?v=21', 'json').catch(() => null),
+    grab('data/shop-placement.json?v=25', 'json'),
   ]);
   const heights = new Uint16Array(heightBuffer);
+  const shopClearings = shopPlacement.shops.map(p => {
+    const angle = -p.angleDegrees * Math.PI / 180;
+    return { x: wx(p.centre[0]), z: wy(p.centre[1]), c: Math.cos(angle), s: Math.sin(angle), u: p.bodyWidthMetres * M / 62 };
+  });
+  const clearOfShops = ([x, z]) => !shopClearings.some(p => {
+    const dx = x - p.x, dz = z - p.z, lx = dx * p.c + dz * p.s, lz = -dx * p.s + dz * p.c;
+    return Math.abs(lx) < 31.5 * p.u + 6 * M && lz > -18 * p.u - 6 * M && lz < 24 * p.u + 6 * M;
+  });
+  forest = forest.filter(clearOfShops);
+  parkSpots = parkSpots.filter(clearOfShops);
   // Setup runs in short steps with a breath in between, so the page keeps answering (the 2D map
   // stays live underneath) instead of freezing for the whole build.
   const pass = () => new Promise(resolve => setTimeout(resolve, 0));
@@ -705,13 +716,13 @@ export async function createWorld3d(opts) {
   }
 
   function buildShop(player) {
-    const store = game.meta.players[player.seat].store;
-    // Same model as grocery-bot-grimstad-3d/src/view3d.js, at a compact fixed size.
+    const placement = shopPlacement.shops[player.seat];
+    // Same v2 town model, sized and rotated offline to fit each site's free space.
     const mats = { frame: lit('#583a2d'), wall: lit('#fff3da'), paint: lit(player.colour),
       glass: lit('#b6d4d7'), door: lit('#65493a'),
       sign: new THREE.MeshLambertMaterial({ map: signTexture }), post: lit('#583a2d') };
     const g = new THREE.Group();
-    const u = 18 * M / 62, w = 62 * u, h = 34 * u, d = 34 * u, front = d / 2;
+    const u = placement.bodyWidthMetres * M / 62, w = 62 * u, h = 34 * u, d = 34 * u, front = d / 2;
     g.add(box(w, 1.6 * u, d + 2 * u, mats.frame, 0, .8 * u, 0));
     g.add(box(w - .4 * u, 30 * u, d + 1.6 * u, mats.frame, 0, -15 * u, 0));
     g.add(box(w - 3 * u, h, d - 3 * u, mats.wall, 0, h / 2, 0));
@@ -733,15 +744,9 @@ export async function createWorld3d(opts) {
     sign.castShadow = true;
     g.add(sign);
     for (const sx of [-1, 1]) g.add(box(1.6 * u, 9 * u, 1.6 * u, mats.post, sx * 14 * u, h + 9 * u, front - 6 * u));
-    const ring = store?.footprint?.ring;
-    let x = player.shop[0], z = player.shop[1];
-    if (ring?.length) {
-      const xs = [], zs = [];
-      for (let i = 0; i < ring.length; i += 2) { xs.push(wx(ring[i])); zs.push(wy(ring[i + 1])); }
-      x = (Math.min(...xs) + Math.max(...xs)) / 2;
-      z = (Math.min(...zs) + Math.max(...zs)) / 2;
-    }
+    const x = wx(placement.centre[0]), z = wy(placement.centre[1]);
     const offset = [x - player.shop[0], z - player.shop[1]];
+    g.rotation.y = placement.angleDegrees * Math.PI / 180;
     g.position.set(offset[0], 0, offset[1]);
     const wrapper = new THREE.Group();
     wrapper.add(g);
@@ -749,8 +754,11 @@ export async function createWorld3d(opts) {
     wrapper.userData.shopColour = player.colour;
     wrapper.userData.shopSeat = player.seat;
     wrapper.userData.shopAt = [x, z];
+    wrapper.userData.shopWidthMetres = placement.bodyWidthMetres;
+    wrapper.userData.shopPlacement = placement;
     wrapper.traverse(o => { if (o.isMesh) o.renderOrder = 30; });
-    return { group: wrapper, mats: Object.values(mats), actual: true, offset, top: h + 23.65 * u, radius: Math.hypot(w, d) / 2 };
+    const ground = Math.max(heightAt(x, z), ...placement.footprint.map(([lon, lat]) => heightAt(wx(lon), wy(lat))));
+    return { group: wrapper, mats: Object.values(mats), actual: true, offset, ground, top: h + 23.65 * u, radius: Math.hypot(w, d) / 2 };
   }
 
   // The real store building at its real size, dressed as the Grocery Bot shop of the 2D map and the
@@ -1362,7 +1370,7 @@ export async function createWorld3d(opts) {
       {
         // stand on the highest corner; the footing covers the downhill side
         const sx = player.shop[0] + (actor.shop.offset?.[0] || 0), sz = player.shop[1] + (actor.shop.offset?.[1] || 0), hw = 31 * SHOP_SCALE * actor.grow, hd = 18 * SHOP_SCALE * actor.grow;
-        actor.base = actor.shop.actual ? heightAt(sx, sz) : Math.max(heightAt(sx, sz), heightAt(sx - hw, sz - hd), heightAt(sx + hw, sz - hd), heightAt(sx - hw, sz + hd), heightAt(sx + hw, sz + hd));
+        actor.base = actor.shop.actual ? actor.shop.ground ?? heightAt(sx, sz) : Math.max(heightAt(sx, sz), heightAt(sx - hw, sz - hd), heightAt(sx + hw, sz - hd), heightAt(sx - hw, sz + hd), heightAt(sx + hw, sz + hd));
         actor.shop.group.position.y = actor.base;
         const S = SHOP_SCALE * actor.grow, mid = project(sx, actor.base + 22 * S, sz), side = project(sx + 31 * S, actor.base + 22 * S, sz);
         const actual = actor.shop.actual && project(sx, actor.base + actor.shop.top, sz);

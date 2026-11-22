@@ -77,6 +77,11 @@ host_ids = {i for i, b in enumerate(buildings["buildings"]) if tuple(b[1:]) in s
 # Two stores have synthetic footprints, so there is no source building to remove.
 assert host_ids, "Expected mapped host buildings for the player shops"
 assert not (host_ids & resident_ids), "Original shop buildings must be absent from the rendered city"
+placements = load("shop-placement.json")
+placement_sources = ["buildings.bin", "buildings.json", "homes.json", "game-map.json", "game.json", "landmarks.json"]
+assert placements["source"] == hashlib.sha256(b"".join((DATA / p).read_bytes() for p in placement_sources)).hexdigest()[:16], "Shop placements are stale: rerun tools/fit_shop_sites.py"
+assert [p["seat"] for p in placements["shops"]] == list(range(12))
+assert all(p["bodyWidthMetres"] > 18 and p["roadClearanceMetres"] >= 3 and p["buildingClearanceMetres"] >= 3 for p in placements["shops"])
 assert [(h["p"], h["ring"]) for h in load("homes.json")["homes"]] == [(h["p"], h["ring"]) for h in buildings["homes"]]
 tree_header = baked("trees.bin", ["game-map.json", "buildings.json", "landcover.json", "game.json", "homes.json", "landmarks.json"])
 assert tree_header["forest"] > 1000 and tree_header["parks"] > 500, tree_header

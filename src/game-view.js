@@ -20,7 +20,7 @@ grab('data/game-map.json?v=21', 'json');
 grab('data/trees.bin?v=21', 'arrayBuffer').catch(() => null);
 let view3dModule = null;
 if (wants3d) {
-  view3dModule = import('./view3d.js?v=24');
+  view3dModule = import('./view3d.js?v=25');
   for (const [url, kind] of [['data/terrain.json?v=21', 'json'], ['data/terrain.bin?v=21', 'arrayBuffer'],
     ['data/buildings.bin?v=21', 'arrayBuffer'], ['data/homes.json?v=21', 'json'], ['data/landmarks.json?v=21', 'json']]) grab(url, kind).catch(() => null);
 }
@@ -562,7 +562,7 @@ async function setMode(next) {
     $('message').hidden = false;
     $('message').textContent = 'Preparing Oslo…';
     await forestReady;
-    loading3d ||= (view3dModule || import('./view3d.js?v=24')).then(m => m.createWorld3d({
+    loading3d ||= (view3dModule || import('./view3d.js?v=25')).then(m => m.createWorld3d({
       host: host3d, overlay: ctx, view, town, game, play, wx, wy, truckAt, shopSign, labels: town.labels || MAP_LABELS, trees, grab, paths,
       constants: { OPEN, CLAIMED, DELIVERED, MISSED, PARKED, TRAIL, POP_TICKS, INK },
       selected: () => panels?.selectedOrder ?? null, onTap: choose, hover: pickAt,

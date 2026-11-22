@@ -22,7 +22,8 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
           const p = o.geometry.parameters;
           if (p?.width) dimensions.push([p.width, p.height, p.depth]);
         });
-        return { scale: group.scale.toArray(), colours, dimensions, colour: group.userData.shopColour };
+        return { scale: group.scale.toArray(), colours, dimensions, colour: group.userData.shopColour,
+          width: group.userData.shopWidthMetres, placement: group.userData.shopPlacement };
       }));
     assert.equal(shops.length, 12);
     for (const shop of shops) {
@@ -30,7 +31,10 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
       assert(shop.colours.includes(shop.colour.replace('#', '').toLowerCase()), 'Shop must use its player colour');
       assert(shop.colours.includes('b6d4d7'));
       assert(shop.colours.includes('fff3da'));
-      assert(Math.max(...shop.dimensions.map(d => d[1])) < 12, 'No mall-height shop walls');
+      assert(shop.width >= 18 && shop.width <= 46);
+      assert(shop.placement.roadClearanceMetres >= 3);
+      assert(shop.placement.buildingClearanceMetres >= 3);
+      assert(shop.dimensions.some(d => Math.abs(d[0] - shop.width / 1.113) < .01), 'Model must use fitted site width');
     }
     assert.deepEqual(errors, []);
     assert.equal(new Set(shops.map(shop => shop.colour)).size, 12);

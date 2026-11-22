@@ -28,8 +28,11 @@ Playback opens at tick 120 with deliveries in motion; scrub back or use `?t=0` f
   **Every building's complete walls and roof are built and stay resident**: they stream in
   nearest-first while the page opens and are all in place within seconds. No distance-based
   wall hiding, level of detail or geometry swapping happens while moving the camera.
-  The twelve shops use the same small player-coloured v2 model, not the height or outline of
-  the real store or mall they replace. There are about **54,200 background buildings** plus the
+  The twelve shops use the same player-coloured v2 model, fitted individually to free space
+  at 20–46 m wide rather than stretching to a mall outline. Their complete footprints,
+  including awnings, stay at least 3 m from rendered roads and neighbouring buildings.
+  `tools/fit_shop_sites.py` generates and checks `data/shop-placement.json` offline.
+  There are about **54,200 background buildings** plus the
   delivery homes. Real elevation now spans **0–377 m**, on a **711 × 668** height grid.
 - **Oslo's landmarks, true to life** (`src/landmarks.js`, data from `tools/bake_landmarks.py`).
   The plain building data missed or flattened Oslo's famous buildings (OpenStreetMap maps them
